@@ -1,0 +1,12 @@
+[
+  {"order_id": "CN-1042", "status": "delivered", "items": ["Strada GX 2025, size M"],
+   "order_date": "2026-10-08", "delivery_date": "2026-10-15"},
+  {"order_id": "CN-1043", "status": "delivered", "items": ["Aero R1 2025, size L"],
+   "order_date": "2026-07-28", "delivery_date": "2026-08-04"},
+  {"order_id": "CN-1044", "status": "shipped", "items": ["Ridge E 2025, size L"],
+   "order_date": "2026-10-16", "delivery_date": null},
+  {"order_id": "CN-1045", "status": "processing", "items": ["Metro C 2025, size S", "Rear rack"],
+   "order_date": "2026-10-19", "delivery_date": null},
+  {"order_id": "CN-1046", "status": "cancelled", "items": ["Strada GX 2023, size S"],
+   "order_date": "2026-09-02", "delivery_date": null}
+]
