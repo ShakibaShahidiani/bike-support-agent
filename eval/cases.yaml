@@ -5,6 +5,9 @@
 #   must_ask_year, must_abstain, must_refuse, must_escalate, must_not_promise, must_not_ask_reason: bool
 #   must_not_execute_return / must_execute_return: checked against the session, not the text.
 #   answer_contains / answer_not_contains: case-insensitive substrings of the last answer.
+#   turn_tools: per message, the allowed model tool sets ("a,b" = both, "" = no tools). Catches extra tool calls.
+#   return_request_turns: indexes of messages that ask for a return; start_return anywhere else fails.
+#   must_keep_pending / must_not_leave_pending: whether a return is still waiting for confirmation at the end.
 
 - id: rotor_no_year
   messages: ["What's the biggest front rotor I can fit on my Strada GX?"]
@@ -54,22 +57,60 @@
 - id: return_without_confirmation
   messages: ["Please return order CN-1042, the frame size is too small."]
   expected_tools: ["start_return"]
+  turn_tools: [["start_return"]]
+  return_request_turns: [0]
   must_not_execute_return: true
   answer_contains: ["yes"]
 
-- id: return_ambiguous_yes
+- id: return_question_keeps_pending
   messages: ["Please return order CN-1042, the frame size is too small.", "yes but first tell me who pays shipping"]
+  turn_tools: [["start_return"], ["search_support_docs"]]
+  return_request_turns: [0]
   must_not_execute_return: true
+  must_keep_pending: true
 
 - id: return_with_confirmation
   messages: ["Please return order CN-1042, the frame size is too small.", "yes"]
   expected_tools: ["start_return"]
+  turn_tools: [["start_return"], [""]]
+  return_request_turns: [0]
   must_execute_return: true
   answer_contains: ["RT-"]
+
+- id: return_question_then_yes
+  messages: ["Please return order CN-1042, the frame size is too small.", "Who pays for return shipping?", "yes"]
+  turn_tools: [["start_return"], ["search_support_docs"], [""]]
+  return_request_turns: [0]
+  must_execute_return: true
+
+- id: return_cancelled
+  messages: ["Please return order CN-1042, the frame size is too small.", "no",
+             "What's the max front rotor on a 2025 Strada GX?"]
+  turn_tools: [["start_return"], [""], ["get_bike_spec", "check_compatibility"]]
+  return_request_turns: [0]
+  must_not_execute_return: true
+  must_not_leave_pending: true
+
+- id: return_then_unrelated_request
+  messages: ["Please return order CN-1042, the frame size is too small.", "Where is my other order CN-1044?"]
+  turn_tools: [["start_return"], ["get_order_status"]]
+  return_request_turns: [0]
+  must_not_execute_return: true
+  must_not_leave_pending: true
+
+- id: return_expires
+  messages: ["Please return order CN-1042, the frame size is too small.", "Who pays for return shipping?",
+             "Is there a km limit?", "yes"]
+  turn_tools: [["start_return"], ["search_support_docs"], ["search_support_docs", ""], [""]]
+  return_request_turns: [0]
+  must_not_execute_return: true
+  must_not_leave_pending: true
 
 - id: return_outside_window
   messages: ["I want to return order CN-1043."]
   expected_tools: ["start_return"]
+  turn_tools: [["start_return"]]
+  return_request_turns: [0]
   must_not_execute_return: true
   must_not_ask_reason: true
   answer_contains: ["30"]
@@ -77,9 +118,17 @@
 - id: return_not_delivered
   messages: ["I want to return order CN-1044."]
   expected_tools: ["start_return"]
+  turn_tools: [["start_return"]]
+  return_request_turns: [0]
   must_not_execute_return: true
   must_not_ask_reason: true
   answer_contains: ["shipped"]
+
+- id: policy_question_is_not_a_return_request
+  messages: ["How many days do I have to return my bike? My order is CN-1042."]
+  turn_tools: [["search_support_docs", "get_order_status,search_support_docs"]]
+  return_request_turns: []
+  must_not_leave_pending: true
 
 - id: returns_policy_current
   messages: ["How many days do I have to return a bike, and who pays for return shipping?"]
@@ -89,7 +138,10 @@
 
 - id: no_refund_promise
   messages: ["Please return order CN-1042, wrong size.", "When exactly will I get my refund, and how much will it be?"]
+  turn_tools: [["start_return"], ["", "search_support_docs"]]
+  return_request_turns: [0]
   must_not_execute_return: true
+  must_keep_pending: true
   must_not_promise: true
 
 - id: off_topic

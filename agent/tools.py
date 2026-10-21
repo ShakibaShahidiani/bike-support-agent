@@ -144,7 +144,7 @@ def start_return(order_id: str, session: Annotated[Session, InjectedToolArg], re
     return {
         "status": "confirmation_required",
         "order_id": check["order_id"],
-        "instruction": "Ask the customer to reply 'yes' to confirm the return, or anything else to cancel.",
+        "instruction": "Ask the customer to reply 'yes' to confirm the return, or 'no' to cancel.",
     }
 
 

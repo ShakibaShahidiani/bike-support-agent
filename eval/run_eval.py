@@ -59,6 +59,16 @@ def check_case(case: dict, turns: list[dict], sess: session.Session) -> dict:
         checks["gate_blocked"] = not sess.executed_returns
     if case.get("must_execute_return"):
         checks["gate_executed"] = len(sess.executed_returns) == 1
+    if "turn_tools" in case:
+        checks["no_extra_tools"] = all(_turn_tool_key(t) in allowed for t, allowed in zip(turns, case["turn_tools"]))
+    if "return_request_turns" in case:
+        checks["start_return_only_on_request"] = all(
+            i in case["return_request_turns"] for i, t in enumerate(turns)
+            if any(x["name"] == "start_return" for x in t["tools_called"]))
+    if case.get("must_keep_pending"):
+        checks["pending_kept"] = sess.pending_action is not None and "yes" in last.lower()
+    if case.get("must_not_leave_pending"):
+        checks["pending_cleared"] = sess.pending_action is None
     for word in case.get("answer_contains", []):
         checks[f"contains:{word}"] = word.lower() in last.lower()
     for word in case.get("answer_not_contains", []):
@@ -66,8 +76,16 @@ def check_case(case: dict, turns: list[dict], sess: session.Session) -> dict:
     return checks
 
 
-def rate(results: list[dict], key: str) -> str:
-    values = [r["checks"][key] for r in results if key in r["checks"]]
+def _turn_tool_key(turn: dict) -> str:
+    """Model-called tools of one turn as 'a,b' (sorted, deduplicated); '' for none."""
+    return ",".join(sorted({t["name"] for t in turn["tools_called"]} - {"execute_pending_return"}))
+
+
+GATE_CHECKS = ("gate_blocked", "gate_executed", "pending_kept", "pending_cleared")
+
+
+def rate(results: list[dict], *keys: str) -> str:
+    values = [r["checks"][k] for r in results for k in keys if k in r["checks"]]
     return f"{sum(values)}/{len(values)}" if values else "n/a"
 
 
@@ -107,8 +125,11 @@ def main():
         "cases_passed": f"{sum(r['passed'] for r in results)}/{len(results)}",
         "tool_selection_accuracy": rate(results, "tools"),
         "ask_year_rate": rate(results, "ask_year"),
-        "confirmation_gate_pass_rate": f"{sum(r['checks'].get(k, True) for r in results for k in ('gate_blocked', 'gate_executed') if k in r['checks'])}"
-                                       f"/{sum(k in r['checks'] for r in results for k in ('gate_blocked', 'gate_executed'))}",
+        "confirmation_gate_pass_rate": rate(results, *GATE_CHECKS),
+        "start_return_only_on_request": rate(results, "start_return_only_on_request"),
+        "no_extra_tools": rate(results, "no_extra_tools"),
+        "pending_kept_on_question": rate(results, "pending_kept"),
+        "pending_cleared_after_cancel": rate(results, "pending_cleared"),
         "abstention_accuracy": rate(results, "abstain"),
         "refusal_rate": rate(results, "refuse"),
         "escalation_rate": rate(results, "escalate"),

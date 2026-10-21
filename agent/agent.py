@@ -2,7 +2,7 @@
 
 Order of checks per turn:
   1. input guardrail (length)
-  2. pending return? -> explicit confirmation executes it in code, anything else cancels it
+  2. pending return? -> yes executes, no cancels, a question keeps it pending (in code)
   3. safety escalation -> model without tools + forced handover, post-checked
   4. normal tool loop (max 5 iterations)
   5. grounding post-check on numbers in the answer
