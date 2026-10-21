@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from agent import config
 from agent.agent import handle_turn
 from agent.logger import log_feedback
+from agent.metrics import load_metrics
 from agent.session import SESSIONS
 
 app = FastAPI(title="Ferro Cycles support agent (demo)")
@@ -45,6 +46,12 @@ def health():
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     return handle_turn(req.session_id, req.message)
+
+
+@app.get("/metrics")
+def metrics(include_eval: bool = False):
+    """Monitoring view over the logs: latency, cost, CSAT proxy, escalations, per prompt version."""
+    return load_metrics(include_eval)
 
 
 @app.post("/feedback")

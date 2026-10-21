@@ -11,7 +11,7 @@ logging, a REST API, and a chat UI with thumbs up/down feedback.
 
 ```mermaid
 flowchart LR
-    UI[Streamlit UI<br/>ui/app.py] -->|POST /chat, /feedback| API[FastAPI<br/>api/main.py]
+    UI[Streamlit UI<br/>chat + Metrics page] -->|POST /chat, /feedback<br/>GET /metrics| API[FastAPI<br/>api/main.py]
     API --> AG[Agent loop<br/>agent/agent.py]
     AG --> GR{Code guardrails<br/>length · confirmation gate ·<br/>safety escalation · grounding check}
     AG -->|LiteLLM| LLM[(Chat model<br/>MODEL env var)]
@@ -30,6 +30,7 @@ flowchart LR
 | `agent/tools.py` | `get_bike_spec`, `check_compatibility`, `get_order_status`, `search_support_docs`, `start_return` |
 | `agent/agent.py` | One `handle_turn()` per message: guardrails → gate → tool loop (max 5) → grounding check → log |
 | `agent/guardrails.py` | Small pure functions: confirm/cancel rules, safety keywords, number grounding, PII masking |
+| `agent/metrics.py` | Joins turn logs and feedback: thumbs-up rate (CSAT proxy), latency p50/p95, cost, escalation and fallback rates per prompt version. Served by `GET /metrics`, shown on the UI's Metrics page |
 | `agent/rag.py` | Loads `data/docs/*.md` into Chroma; filters out superseded policies by date |
 | `eval/` | 28 cases, deterministic checks, `--repeat` runs, v1 / v2 / v3 results |
 
@@ -42,9 +43,9 @@ cp .env.example .env                        # add OPENAI_API_KEY
 
 .venv/bin/python -m agent.agent             # terminal chat, or:
 .venv/bin/uvicorn api.main:app --reload     # API on :8000
-.venv/bin/streamlit run ui/app.py           # UI (API_URL defaults to http://localhost:8000)
+.venv/bin/streamlit run ui/app.py           # chat UI + Metrics page in the sidebar
 
-.venv/bin/pytest tests/                     # 85 unit tests, no API calls
+.venv/bin/pytest tests/                     # 91 unit tests, no API calls
 .venv/bin/python -m eval.run_eval --prompt v3 --repeat 3
 .venv/bin/python -m eval.compare v1 v2 v3
 ```
@@ -117,7 +118,7 @@ Retrieval `k` was also raised from 3 to 5, because "give me all your policies" m
 1. Azure OpenAI (data residency, private networking), same code via `MODEL`.
 2. Real order and CRM APIs behind authentication instead of JSON files.
 3. Webhooks for order events (shipped, delivered) to keep status fresh.
-4. Monitoring dashboards on the turn logs, CSAT from real users, and proper PII handling (detection service, retention policy).
+4. Monitoring dashboards (the demo's Metrics page, moved to e.g. Azure Monitor / App Insights with alerts), CSAT from real users, and proper PII handling (detection service, retention policy).
 5. **Customer verification.** Today anyone who guesses an order ID like `CN-1042` sees its status. Require a second
    detail (e.g. postcode) or a logged-in session.
 6. **Idempotency keys in a database.** The demo dedupes returns in memory; production needs a unique key per action.
