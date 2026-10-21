@@ -61,3 +61,8 @@ def test_turn_is_logged(fake_model):
     assert line["tools_called"][0]["name"] == "start_return"
     assert "[EMAIL]" in line["user_message"]
     assert line["input_tokens"] == 20
+
+
+def test_litellm_tool_path_imports():
+    # litellm imports the undeclared 'mcp' package whenever tools are passed; keep it in requirements.txt
+    import litellm.responses.mcp.chat_completions_handler  # noqa: F401
