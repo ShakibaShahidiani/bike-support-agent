@@ -50,6 +50,9 @@ cp .env.example .env                        # add OPENAI_API_KEY
 .venv/bin/python -m eval.compare v1 v2 v3
 ```
 
+**Deployed demo:** `bike.shakiba.nl` (password-protected; one Docker image, API + UI, see `Dockerfile`,
+`compose.yaml`, `Makefile`). `make deploy` builds for linux/amd64, tags with the git SHA, pushes, and waits for `/health`.
+
 Default model: `openai/gpt-6-luna`. Switching to Azure OpenAI only needs `MODEL=azure/<deployment>` plus credentials.
 
 ## Eval results: v1 → v2 → v3

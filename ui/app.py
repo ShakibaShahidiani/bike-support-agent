@@ -5,11 +5,14 @@ import uuid
 import requests
 import streamlit as st
 
+from auth import require_password
+
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Ferro Cycles support (demo)", page_icon="🚲")
 st.title("Ferro Cycles support")
 st.caption("Demo with fictional brand, bikes, orders and policies.")
+require_password()
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())

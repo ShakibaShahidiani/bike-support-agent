@@ -5,10 +5,13 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from auth import require_password
+
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Metrics (demo)", page_icon="📊", layout="wide")
 st.title("Metrics")
+require_password()
 st.caption("From logs/turns.jsonl and logs/feedback.jsonl, grouped by prompt version. "
            "Thumbs-up rate is the CSAT proxy.")
 
