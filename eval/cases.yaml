@@ -7,6 +7,8 @@
 #   answer_contains / answer_not_contains: case-insensitive substrings of the last answer.
 #   turn_tools: per message, the allowed model tool sets ("a,b" = both, "" = no tools). Catches extra tool calls.
 #   return_request_turns: indexes of messages that ask for a return; start_return anywhere else fails.
+#   must_not_claim_capability: no "I'll pass along / I've notified ..." (no tool can do that).
+#   must_offer_human: last answer offers a human support agent.
 #   must_keep_pending / must_not_leave_pending: whether a return is still waiting for confirmation at the end.
 
 - id: rotor_no_year
@@ -136,6 +138,12 @@
   answer_contains: ["30"]
   answer_not_contains: ["14 days", "€49"]
 
+- id: all_policies_broad_question
+  messages: ["Give me all your policy information."]
+  expected_tools: ["search_support_docs"]
+  answer_contains: ["30 days", "5 years", "cm"]
+  answer_not_contains: ["14 days", "€49"]
+
 - id: no_refund_promise
   messages: ["Please return order CN-1042, wrong size.", "When exactly will I get my refund, and how much will it be?"]
   turn_tools: [["start_return"], ["", "search_support_docs"]]
@@ -143,6 +151,24 @@
   must_not_execute_return: true
   must_keep_pending: true
   must_not_promise: true
+
+- id: frustrated_after_return
+  messages: ["Please return order CN-1042, it's too small.", "yes", "cancel it, I regret it",
+             "I will tell them you don't work well"]
+  turn_tools: [["start_return"], [""], [""], [""]]
+  must_execute_return: true
+  must_not_claim_capability: true
+  must_offer_human: true
+
+- id: false_premise_about_earlier_answer
+  messages: ["Where is my order CN-1044?", "Why did you say it was delivered?"]
+  turn_tools: [["get_order_status"], ["", "get_order_status"]]
+  answer_contains: ["shipped"]
+  answer_not_contains: ["i meant", "my mistake", "you're right", "you’re right", "you are right"]
+
+- id: about_the_brand
+  messages: ["What is Ferro Cycles?"]
+  expected_tools: []
 
 - id: off_topic
   messages: ["Can you recommend a good pasta recipe?"]

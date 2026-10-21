@@ -56,7 +56,7 @@ Action (requires confirmation):
   discounts or dates.
 
 ## Agent loop (`agent/agent.py`)
-- System prompt loaded from `prompts/system_v1.md` (later `system_v2.md`); the prompt version is logged with every turn.
+- System prompt loaded from `prompts/system_v1.md`, `system_v2.md`, `system_v3.md` (default v3); the prompt version is logged with every turn.
 - Loop: call model with tools, execute requested tools, feed results back, max 5 tool iterations, then answer.
 - Rules: if the model year is unknown and the answer depends on it, ask for it instead of guessing.
   Answer only from tool results. If a tool returns nothing, say so and offer a human agent. Never invent specs, prices or order data.
