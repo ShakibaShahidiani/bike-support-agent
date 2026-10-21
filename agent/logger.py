@@ -9,12 +9,14 @@ from agent.guardrails import redact_pii
 def _append(filename: str, record: dict) -> None:
     config.LOGS_DIR.mkdir(exist_ok=True)
     record = {"timestamp": datetime.now(timezone.utc).isoformat(), **record}
-    line = redact_pii(json.dumps(record, ensure_ascii=False))
     with open(config.LOGS_DIR / filename, "a") as f:
-        f.write(line + "\n")
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def log_turn(record: dict) -> None:
+    # Redact only free-text fields; structured fields (timestamps, ids) must stay intact.
+    record = {**record, "user_message": redact_pii(record["user_message"]),
+              "tools_called": json.loads(redact_pii(json.dumps(record["tools_called"])))}
     _append("turns.jsonl", record)
 
 

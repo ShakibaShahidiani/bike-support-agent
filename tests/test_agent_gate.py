@@ -60,6 +60,7 @@ def test_turn_is_logged(fake_model):
     line = json.loads((fake_model / "turns.jsonl").read_text().splitlines()[0])
     assert line["tools_called"][0]["name"] == "start_return"
     assert "[EMAIL]" in line["user_message"]
+    assert "[PHONE]" not in line["timestamp"]
     assert line["input_tokens"] == 20
 
 
