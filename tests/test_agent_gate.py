@@ -163,3 +163,11 @@ def test_model_failure_returns_friendly_fallback(fake_model, monkeypatch):
 def test_litellm_tool_path_imports():
     # litellm imports the undeclared 'mcp' package whenever tools are passed; keep it in requirements.txt
     import litellm.responses.mcp.chat_completions_handler  # noqa: F401
+
+
+def test_second_return_request_after_execution_does_not_ask_again(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    agent.handle_turn("s", "yes")
+    out = agent.handle_turn("s", "I want to return CN-1042")
+    assert out["pending_confirmation"] is False
+    assert len(tools.RETURNS) == 1

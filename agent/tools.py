@@ -128,6 +128,10 @@ def start_return(order_id: str, session: Annotated[Session, InjectedToolArg], re
     if not session.return_allowed:  # enforced in code, not only in the prompt
         return {"error": "no_return_request",
                 "detail": "The customer did not ask for a return in this message. Do not start a return."}
+    if order_id.strip().upper() in RETURNS:
+        return {"status": "already_returned", "order_id": order_id.strip().upper(),
+                "return_id": RETURNS[order_id.strip().upper()],
+                "instruction": "Tell the customer a return already exists for this order; do not start another."}
     pending = session.pending_action
     if pending and pending["order_id"] == order_id.strip().upper():
         return {"status": "already_pending", "order_id": pending["order_id"],

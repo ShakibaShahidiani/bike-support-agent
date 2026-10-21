@@ -197,3 +197,13 @@ def test_start_return_does_not_duplicate_pending():
     result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "y", "session": session})
     assert result["status"] == "already_pending"
     assert session.pending_action == first
+
+
+def test_start_return_on_already_returned_order():
+    session = Session("s7", return_allowed=True)
+    session.pending_action = {"type": "start_return", "order_id": "CN-1042", "reason": "x", "created_turn": 0}
+    return_id = tools.execute_pending_return(session, today=TODAY)["return_id"]
+    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
+    assert result["status"] == "already_returned"
+    assert result["return_id"] == return_id
+    assert session.pending_action is None  # no new confirmation asked
