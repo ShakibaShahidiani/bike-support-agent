@@ -62,3 +62,27 @@ def test_pii_redaction():
 def test_input_length():
     assert g.input_too_long("x" * 2001)
     assert not g.input_too_long("x" * 2000)
+
+
+@pytest.mark.parametrize("msg", ["no", "Cancel", "no thanks", "cancel the return"])
+def test_cancellation(msg):
+    assert g.is_cancellation(msg)
+
+
+@pytest.mark.parametrize("msg", ["no idea how shipping works?", "nothing else"])
+def test_not_cancellation(msg):
+    assert not g.is_cancellation(msg)
+
+
+@pytest.mark.parametrize("msg,related", [
+    ("who pays the shipping?", True), ("yes but how long does it take?", True),
+    ("what about CN-1042?", True), ("where is CN-1044?", False),
+    ("what's the rotor size on a 2025 Strada GX?", False),
+])
+def test_related_to_pending(msg, related):
+    assert g.is_related_to_pending(msg, "CN-1042") is related
+
+
+def test_return_intent():
+    assert g.has_return_intent("I want to return my bike")
+    assert not g.has_return_intent("where is my order?")

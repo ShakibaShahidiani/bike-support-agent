@@ -48,11 +48,76 @@ def test_return_needs_explicit_confirmation(fake_model):
     assert list(tools.RETURNS) == ["CN-1042"]
 
 
-def test_anything_but_yes_cancels(fake_model):
+def _pending(sid="s"):
+    return session.get_session(sid).pending_action
+
+
+def test_question_keeps_pending_then_yes_executes(fake_model):
     agent.handle_turn("s", "I want to return order CN-1042")
     out = agent.handle_turn("s", "hmm, what does shipping cost?")
-    assert "pending_return_cancelled" in out["flags"]
+    assert "pending_return_kept" in out["flags"]
+    assert out["pending_confirmation"] is True
+    assert agent.handle_turn("s", "yes")["flags"][0] == "return_executed"
+
+
+def test_yes_but_keeps_pending(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    out = agent.handle_turn("s", "yes but first tell me who pays shipping")
+    assert "pending_return_kept" in out["flags"]
     assert tools.RETURNS == {}
+
+
+@pytest.mark.parametrize("msg", ["no", "cancel", "No thanks."])
+def test_explicit_no_cancels_without_model_call(fake_model, msg):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    out = agent.handle_turn("s", msg)
+    assert "pending_return_cancelled" in out["flags"]
+    assert _pending() is None
+    line = json.loads((fake_model / "turns.jsonl").read_text().splitlines()[-1])
+    assert line["latency_ms"]["model_calls"] == []
+
+
+def test_unrelated_request_cancels_and_cannot_recreate(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    # the fake model tries start_return again, but this message doesn't ask for a return
+    out = agent.handle_turn("s", "What's the max rotor on a 2025 Strada GX?")
+    assert "pending_return_cancelled" in out["flags"]
+    assert _pending() is None
+
+
+def test_other_order_id_is_unrelated(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    out = agent.handle_turn("s", "and where is CN-1044?")
+    assert "pending_return_cancelled" in out["flags"]
+
+
+def test_pending_expires_after_two_follow_up_turns(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    agent.handle_turn("s", "who pays shipping?")
+    agent.handle_turn("s", "is there a km limit?")
+    out = agent.handle_turn("s", "yes")
+    assert "pending_return_expired" in out["flags"]
+    assert "expired" in out["answer"]
+    assert tools.RETURNS == {}
+
+
+def test_start_return_blocked_when_not_asked(fake_model):
+    out = agent.handle_turn("s", "What's the battery on the Ridge E 2025?")
+    assert out["tools_called"][0]["name"] == "start_return"  # the model tried...
+    assert _pending() is None  # ...but code refused
+
+
+def test_follow_up_answer_without_return_word_is_allowed(fake_model, monkeypatch):
+    calls = iter([
+        _response(tool_calls=[_tool_call("start_return", {"order_id": "CN-1042"})]),  # no reason yet
+        _response(content="Why do you want to return it?"),
+        _response(tool_calls=[_tool_call("start_return", {"order_id": "CN-1042", "reason": "too small"})]),
+        _response(content="Reply yes to confirm."),
+    ])
+    monkeypatch.setattr(agent.litellm, "completion", lambda **kw: next(calls))
+    agent.handle_turn("s", "I want to return CN-1042")
+    agent.handle_turn("s", "it's too small")  # no 'return' word, but answers the follow-up
+    assert _pending()["reason"] == "too small"
 
 
 def test_turn_is_logged(fake_model):

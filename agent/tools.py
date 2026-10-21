@@ -125,13 +125,22 @@ def start_return(order_id: str, session: Annotated[Session, InjectedToolArg], re
     """Request a return. Call this as soon as you know the order id, even without a reason:
     it first checks eligibility (delivered, inside the return window). It does NOT execute the
     return: the customer must confirm first by replying 'yes'."""
+    if not session.return_allowed:  # enforced in code, not only in the prompt
+        return {"error": "no_return_request",
+                "detail": "The customer did not ask for a return in this message. Do not start a return."}
+    pending = session.pending_action
+    if pending and pending["order_id"] == order_id.strip().upper():
+        return {"status": "already_pending", "order_id": pending["order_id"],
+                "instruction": "Ask the customer to reply 'yes' to confirm or 'no' to cancel."}
     check = check_return_eligibility(order_id)
     if not check.get("eligible"):
         return check
     if not reason:
+        session.awaiting_return_info = True  # the next message may answer without saying "return"
         return {"eligible": True, "status": "reason_required", "order_id": check["order_id"],
                 "instruction": "The order is eligible. Ask the customer for a short reason, then call start_return again."}
-    session.pending_action = {"type": "start_return", "order_id": check["order_id"], "reason": reason}
+    session.pending_action = {"type": "start_return", "order_id": check["order_id"], "reason": reason,
+                              "created_turn": session.turn_count}
     return {
         "status": "confirmation_required",
         "order_id": check["order_id"],

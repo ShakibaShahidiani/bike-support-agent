@@ -112,7 +112,7 @@ def test_search_tool_rejects_unknown_model():
 # ---------- start_return: confirmation gate, window, idempotency ----------
 
 def test_start_return_only_creates_pending_action():
-    session = Session("s1")
+    session = Session("s1", return_allowed=True)
     result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "too small", "session": session})
     assert result["status"] == "confirmation_required"
     assert session.pending_action["order_id"] == "CN-1042"
@@ -120,7 +120,7 @@ def test_start_return_only_creates_pending_action():
 
 
 def test_start_return_asks_reason_only_when_eligible():
-    session = Session("s1b")
+    session = Session("s1b", return_allowed=True)
     result = tools.start_return.invoke({"order_id": "CN-1042", "session": session})
     assert result["status"] == "reason_required"
     assert session.pending_action is None
@@ -128,7 +128,7 @@ def test_start_return_asks_reason_only_when_eligible():
 
 @pytest.mark.parametrize("order_id", ["CN-1043", "CN-1044"])  # outside window, not delivered
 def test_start_return_rejects_ineligible_before_reason(order_id):
-    session = Session("s1c")
+    session = Session("s1c", return_allowed=True)
     result = tools.start_return.invoke({"order_id": order_id, "session": session})
     assert result["eligible"] is False
     assert "reason_required" not in result.values()
@@ -179,3 +179,21 @@ def test_return_not_delivered():
 def test_session_is_hidden_from_model_schema():
     schema = convert_to_openai_tool(tools.start_return)
     assert set(schema["function"]["parameters"]["properties"]) == {"order_id", "reason"}
+
+
+# ---------- return-intent gate (enforced in code) ----------
+
+def test_start_return_blocked_without_return_request():
+    session = Session("s5")  # return_allowed defaults to False
+    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
+    assert result["error"] == "no_return_request"
+    assert session.pending_action is None
+
+
+def test_start_return_does_not_duplicate_pending():
+    session = Session("s6", return_allowed=True)
+    tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
+    first = dict(session.pending_action)
+    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "y", "session": session})
+    assert result["status"] == "already_pending"
+    assert session.pending_action == first

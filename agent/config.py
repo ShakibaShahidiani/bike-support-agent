@@ -20,6 +20,7 @@ PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v1")
 MAX_TOOL_ITERATIONS = 5
 MAX_INPUT_CHARS = 2000
 MODEL_TIMEOUT_S = 30
+PENDING_MAX_TURNS = 2  # a pending return survives at most 2 follow-up turns
 
 # Must match the current returns policy doc (data/docs/returns_policy_2026.md, "30 days").
 RETURN_WINDOW_DAYS = 30

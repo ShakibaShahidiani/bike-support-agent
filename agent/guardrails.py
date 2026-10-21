@@ -17,6 +17,35 @@ def is_confirmation(message: str) -> bool:
     return bool(CONFIRM_RE.match(message))
 
 
+CANCEL_RE = re.compile(r"^\s*(no|nope|cancel|no,? (thanks|thank you)|cancel (it|the return)|don'?t)\s*[.!]?\s*$", re.I)
+
+
+def is_cancellation(message: str) -> bool:
+    return bool(CANCEL_RE.match(message))
+
+
+RETURN_INTENT_RE = re.compile(r"\breturn(ing)?\b|\bsend (it|this|them|the bike) back\b", re.I)
+
+
+def has_return_intent(message: str) -> bool:
+    return bool(RETURN_INTENT_RE.search(message))
+
+
+# Words that make a message a follow-up about the pending return (keeps it pending).
+PENDING_RELATED_RE = re.compile(
+    r"^\s*yes\b|\b(return|refund|ship(ping)?|label|pick ?up|cost|pay|policy|days?|window|box|"
+    r"condition|km|inspect(ion)?|confirm)\b", re.I)
+ORDER_ID_IN_TEXT_RE = re.compile(r"\bCN-\d{4}\b", re.I)
+
+
+def is_related_to_pending(message: str, order_id: str) -> bool:
+    """A question or 'yes but...' about the pending return keeps it pending; a new request does not."""
+    other_orders = {o.upper() for o in ORDER_ID_IN_TEXT_RE.findall(message)} - {order_id}
+    if other_orders:
+        return False
+    return order_id.lower() in message.lower() or bool(PENDING_RELATED_RE.search(message))
+
+
 # ---------- safety escalation ----------
 
 SAFETY_PATTERNS = [

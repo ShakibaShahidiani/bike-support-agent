@@ -124,12 +124,17 @@ def handle_turn(session_id: str, message: str, prompt_version: str | None = None
 
     session.messages.append({"role": "user", "content": message})
     history_len = len(session.messages)
+    intent = guardrails.has_return_intent(message)
+    session.return_allowed = intent or session.awaiting_return_info
+    session.awaiting_return_info = False  # start_return sets it again if it asks for a reason
     try:
         answer = _respond(turn, message)
     except Exception as e:  # model/API failure after LiteLLM's retries: friendly message, no crash
         del session.messages[history_len:]  # drop half-finished tool calls so the history stays valid
         turn.flags.append(f"model_error:{type(e).__name__}")
         answer = guardrails.MODEL_ERROR_FALLBACK
+    if intent and session.pending_action is None and "return_executed" not in turn.flags:
+        session.awaiting_return_info = True  # agent probably asked for the order id
     return _finish(turn, message, answer, start)
 
 
@@ -148,16 +153,39 @@ def _respond(turn: Turn, message: str) -> str:
     extra_system = None
 
     # 2. Confirmation gate: decided in code, never by the model.
-    if session.pending_action:
-        if guardrails.is_confirmation(message):
+    #    exact yes -> execute | no/cancel -> cancel | question about it -> keep pending, ask again
+    #    expired (> 2 follow-up turns) or unrelated new request -> cancel, then handle normally
+    action = session.pending_action
+    if action:
+        order_id = action["order_id"]
+        if session.turn_count - action["created_turn"] > config.PENDING_MAX_TURNS:
+            session.pending_action = None
+            turn.flags.append("pending_return_expired")
+            if guardrails.is_confirmation(message):
+                turn.flags.append("templated_reply")
+                return (f"That return request for order {order_id} has expired, so nothing was started. "
+                        "If you still want to return it, just ask again.")
+            extra_system = f"An earlier pending return for {order_id} expired without confirmation. Mention this briefly."
+        elif guardrails.is_confirmation(message):
             result = execute_pending_return(session)
             turn.tools_called.append({"name": "execute_pending_return", "args": {}})
             turn.flags.append("return_executed" if result.get("status") == "return_started" else "return_failed")
             turn.flags.append("templated_reply")
             return _return_reply(result)
-        session.pending_action = None
-        turn.flags.append("pending_return_cancelled")
-        extra_system = "The customer did not confirm, so the pending return was cancelled. Mention this briefly."
+        elif guardrails.is_cancellation(message):
+            session.pending_action = None
+            turn.flags += ["pending_return_cancelled", "templated_reply"]
+            return f"Okay, I've cancelled the return request for order {order_id}. Is there anything else I can help with?"
+        elif guardrails.is_related_to_pending(message, order_id):
+            turn.flags.append("pending_return_kept")
+            extra_system = (f"A return for order {order_id} is waiting for the customer's confirmation. "
+                            "Answer their question (do not call start_return), then ask them to reply 'yes' "
+                            "to confirm the return or 'no' to cancel it.")
+        else:
+            session.pending_action = None
+            turn.flags.append("pending_return_cancelled")
+            extra_system = (f"The pending return for {order_id} was cancelled because the customer moved on "
+                            "to a new request. Mention this briefly, then help with the new request.")
 
     # 3. Safety escalation.
     if guardrails.needs_safety_escalation(message):
