@@ -35,13 +35,15 @@ def fmt(value, suffix=""):
     return "–" if value is None else f"{value}{suffix}"
 
 
-cols = st.columns(6)
+cols = st.columns(4)
 cols[0].metric("Turns", row["turns"], help=f"{row['sessions']} sessions")
 cols[1].metric("Thumbs-up rate", fmt(row["thumbs_up_rate"], "%"), help=f"{row['rated_turns']} rated turns")
-cols[2].metric("Latency p50 / p95", f"{fmt(row['latency_p50_ms'])} / {fmt(row['latency_p95_ms'])} ms")
-cols[3].metric("Avg cost / turn", fmt(row["avg_cost_usd"] and f"${row['avg_cost_usd']:.5f}"))
-cols[4].metric("Escalation rate", fmt(row["escalation_rate"], "%"))
-cols[5].metric("Fallback rate", fmt(row["fallback_rate"], "%"),
+cols[2].metric("Latency p50", f"{row['latency_p50_ms'] / 1000:.1f}s")
+cols[3].metric("Latency p95", f"{row['latency_p95_ms'] / 1000:.1f}s")
+cols = st.columns(4)
+cols[0].metric("Avg cost / turn", fmt(row["avg_cost_usd"] and f"${row['avg_cost_usd']:.5f}"))
+cols[1].metric("Escalation rate", fmt(row["escalation_rate"], "%"))
+cols[2].metric("Fallback rate", fmt(row["fallback_rate"], "%"),
                help="Grounding fallback, escalation fallback, model error or max tool iterations")
 
 st.subheader("By prompt version")
