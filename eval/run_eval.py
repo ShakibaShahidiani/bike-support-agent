@@ -86,7 +86,7 @@ GATE_CHECKS = ("gate_blocked", "gate_executed", "pending_kept", "pending_cleared
 
 def rate(results: list[dict], *keys: str) -> str:
     values = [r["checks"][k] for r in results for k in keys if k in r["checks"]]
-    return f"{sum(values)}/{len(values)}" if values else "n/a"
+    return f"{sum(values)}/{len(values)} ({100 * sum(values) / len(values):.0f}%)" if values else "n/a"
 
 
 def p95(values: list[int]) -> int:
@@ -94,35 +94,45 @@ def p95(values: list[int]) -> int:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
+def run_case(case: dict, prompt_version: str, run: int) -> dict:
+    session.SESSIONS.clear()
+    tools.RETURNS.clear()
+    sid = f"eval-{prompt_version}-{run}-{case['id']}"
+    turns = [handle_turn(sid, msg, prompt_version=prompt_version) for msg in case["messages"]]
+    checks = check_case(case, turns, session.get_session(sid))
+    return {
+        "id": case["id"],
+        "run": run,
+        "passed": all(checks.values()),
+        "checks": checks,
+        "turns": [{"message": m, "answer": t["answer"], "tools": [x["name"] for x in t["tools_called"]],
+                   "flags": t["flags"], "latency_ms": t["latency_ms"]} for m, t in zip(case["messages"], turns)],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", default=config.PROMPT_VERSION)
+    parser.add_argument("--repeat", type=int, default=1, help="run every case N times (the model is not deterministic)")
     args = parser.parse_args()
 
     cases = yaml.safe_load((EVAL_DIR / "cases.yaml").read_text())
     results = []
-    for case in cases:
-        session.SESSIONS.clear()
-        tools.RETURNS.clear()
-        sid = f"eval-{args.prompt}-{case['id']}"
-        turns = [handle_turn(sid, msg, prompt_version=args.prompt) for msg in case["messages"]]
-        sess = session.get_session(sid)
-        checks = check_case(case, turns, sess)
-        results.append({
-            "id": case["id"],
-            "passed": all(checks.values()),
-            "checks": checks,
-            "turns": [{"message": m, "answer": t["answer"], "tools": [x["name"] for x in t["tools_called"]],
-                       "flags": t["flags"], "latency_ms": t["latency_ms"]} for m, t in zip(case["messages"], turns)],
-        })
-        r = results[-1]
-        failed = [k for k, v in checks.items() if not v]
-        tools_used = sorted({x for t in r["turns"] for x in t["tools"]})
-        print(f"{'PASS' if r['passed'] else 'FAIL'}  {case['id']:<28} tools={tools_used}  {'failed=' + str(failed) if failed else ''}")
+    for run in range(1, args.repeat + 1):
+        print(f"--- run {run}/{args.repeat}")
+        for case in cases:
+            r = run_case(case, args.prompt, run)
+            results.append(r)
+            failed = [k for k, v in r["checks"].items() if not v]
+            tools_used = sorted({x for t in r["turns"] for x in t["tools"]})
+            print(f"{'PASS' if r['passed'] else 'FAIL'}  {case['id']:<40} tools={tools_used}  "
+                  f"{'failed=' + str(failed) if failed else ''}")
 
     latencies = [t["latency_ms"] for r in results for t in r["turns"]]
     summary = {
-        "cases_passed": f"{sum(r['passed'] for r in results)}/{len(results)}",
+        "runs": args.repeat,
+        "cases_passed": rate([{"checks": {"passed": r["passed"]}} for r in results], "passed"),
+        "cases_passed_per_run": [sum(r["passed"] for r in results if r["run"] == i) for i in range(1, args.repeat + 1)],
         "tool_selection_accuracy": rate(results, "tools"),
         "ask_year_rate": rate(results, "ask_year"),
         "confirmation_gate_pass_rate": rate(results, *GATE_CHECKS),
