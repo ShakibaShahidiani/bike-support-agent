@@ -7,6 +7,7 @@
 # stdin, and would otherwise eat the rest of this piped script (same gotcha as oxbot-miniapp's deploy.sh).
 {
 set -euo pipefail
+umask 077 # .env holds secrets (OPENAI_API_KEY): keep the rewritten file private
 dir="$1" image="$2"
 cd "$HOME/apps/$dir"
 
