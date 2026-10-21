@@ -16,6 +16,7 @@ def _append(filename: str, record: dict) -> None:
 def log_turn(record: dict) -> None:
     # Redact only free-text fields; structured fields (timestamps, ids) must stay intact.
     record = {**record, "user_message": redact_pii(record["user_message"]),
+              "answer": redact_pii(record["answer"]),
               "tools_called": json.loads(redact_pii(json.dumps(record["tools_called"])))}
     _append("turns.jsonl", record)
 

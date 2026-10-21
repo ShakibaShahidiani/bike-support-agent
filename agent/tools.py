@@ -121,12 +121,16 @@ def check_return_eligibility(order_id: str, today: date | None = None) -> dict:
 
 
 @tool
-def start_return(order_id: str, reason: str, session: Annotated[Session, InjectedToolArg]) -> dict:
-    """Request a return for a delivered order. This does NOT execute the return: it asks the
-    customer to confirm first. Tell the customer to reply 'yes' to confirm."""
+def start_return(order_id: str, session: Annotated[Session, InjectedToolArg], reason: str | None = None) -> dict:
+    """Request a return. Call this as soon as you know the order id, even without a reason:
+    it first checks eligibility (delivered, inside the return window). It does NOT execute the
+    return: the customer must confirm first by replying 'yes'."""
     check = check_return_eligibility(order_id)
     if not check.get("eligible"):
         return check
+    if not reason:
+        return {"eligible": True, "status": "reason_required", "order_id": check["order_id"],
+                "instruction": "The order is eligible. Ask the customer for a short reason, then call start_return again."}
     session.pending_action = {"type": "start_return", "order_id": check["order_id"], "reason": reason}
     return {
         "status": "confirmation_required",

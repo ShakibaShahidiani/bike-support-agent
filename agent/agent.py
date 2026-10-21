@@ -123,6 +123,28 @@ def handle_turn(session_id: str, message: str, prompt_version: str | None = None
         return _finish(turn, message, answer, start, store_history=False)
 
     session.messages.append({"role": "user", "content": message})
+    history_len = len(session.messages)
+    try:
+        answer = _respond(turn, message)
+    except Exception as e:  # model/API failure after LiteLLM's retries: friendly message, no crash
+        del session.messages[history_len:]  # drop half-finished tool calls so the history stays valid
+        turn.flags.append(f"model_error:{type(e).__name__}")
+        answer = guardrails.MODEL_ERROR_FALLBACK
+    return _finish(turn, message, answer, start)
+
+
+def _return_reply(result: dict) -> str:
+    """Fixed template after the confirmation gate: no second model call, so faster and cannot misstate the result."""
+    if result.get("status") == "return_started":
+        return (f"Your return for order {result['order_id']} has been started. "
+                f"Your return ID is {result['return_id']}. Our team will send you the next steps.")
+    reason = result.get("reason") or result.get("error", "unknown error")
+    return (f"I couldn't start the return: {reason}. "
+            "Would you like me to hand you over to a human support agent?")
+
+
+def _respond(turn: Turn, message: str) -> str:
+    session = turn.session
     extra_system = None
 
     # 2. Confirmation gate: decided in code, never by the model.
@@ -130,12 +152,9 @@ def handle_turn(session_id: str, message: str, prompt_version: str | None = None
         if guardrails.is_confirmation(message):
             result = execute_pending_return(session)
             turn.tools_called.append({"name": "execute_pending_return", "args": {}})
-            turn.tool_results_text += json.dumps(result) + "\n"
             turn.flags.append("return_executed" if result.get("status") == "return_started" else "return_failed")
-            extra_system = (f"The customer confirmed. The system ran the return action with this result: "
-                            f"{json.dumps(result)}. Tell the customer the outcome. Do not call start_return again.")
-            answer = turn.call_model(extra_system, use_tools=False).content or ""
-            return _finish(turn, message, _grounding_check(turn, answer), start)
+            turn.flags.append("templated_reply")
+            return _return_reply(result)
         session.pending_action = None
         turn.flags.append("pending_return_cancelled")
         extra_system = "The customer did not confirm, so the pending return was cancelled. Mention this briefly."
@@ -147,11 +166,11 @@ def handle_turn(session_id: str, message: str, prompt_version: str | None = None
         if not guardrails.escalation_reply_ok(answer):
             turn.flags.append("escalation_fallback")
             answer = guardrails.ESCALATION_FALLBACK
-        return _finish(turn, message, answer, start)
+        return answer
 
     # 4. Normal tool loop, 5. grounding check.
     answer = _tool_loop(turn, extra_system)
-    return _finish(turn, message, _grounding_check(turn, answer), start)
+    return _grounding_check(turn, answer)
 
 
 def _grounding_check(turn: Turn, answer: str) -> str:
@@ -180,6 +199,7 @@ def _finish(turn: Turn, message: str, answer: str, start: float, store_history: 
         "input_tokens": sum(c["input_tokens"] for c in calls),
         "output_tokens": sum(c["output_tokens"] for c in calls),
         "cost_usd": round(sum(costs), 6) if costs else None,
+        "answer": answer,
         "answer_length": len(answer),
         "flags": turn.flags,
         "pending_action": session.pending_action,

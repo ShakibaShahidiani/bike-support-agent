@@ -69,9 +69,17 @@ def ungrounded_numbers(answer: str, tool_results_text: str) -> list[str]:
     return missing
 
 
+# ---------- model / API failure ----------
+
+MODEL_ERROR_FALLBACK = (
+    "Sorry, I'm having technical trouble right now. Please try again in a moment, "
+    "or I can hand you over to a human support agent."
+)
+
+
 # ---------- PII redaction (for logs) ----------
 
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
 
 

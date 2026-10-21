@@ -11,8 +11,15 @@ from agent.session import Session
 TODAY = date(2026, 10, 21)
 
 
+class FrozenDate(date):
+    @classmethod
+    def today(cls):
+        return TODAY
+
+
 @pytest.fixture(autouse=True)
-def clean_returns():
+def clean_returns(monkeypatch):
+    monkeypatch.setattr(tools, "date", FrozenDate)  # tests must not depend on the real date
     tools.RETURNS.clear()
 
 
@@ -110,6 +117,22 @@ def test_start_return_only_creates_pending_action():
     assert result["status"] == "confirmation_required"
     assert session.pending_action["order_id"] == "CN-1042"
     assert tools.RETURNS == {}  # nothing executed
+
+
+def test_start_return_asks_reason_only_when_eligible():
+    session = Session("s1b")
+    result = tools.start_return.invoke({"order_id": "CN-1042", "session": session})
+    assert result["status"] == "reason_required"
+    assert session.pending_action is None
+
+
+@pytest.mark.parametrize("order_id", ["CN-1043", "CN-1044"])  # outside window, not delivered
+def test_start_return_rejects_ineligible_before_reason(order_id):
+    session = Session("s1c")
+    result = tools.start_return.invoke({"order_id": order_id, "session": session})
+    assert result["eligible"] is False
+    assert "reason_required" not in result.values()
+    assert session.pending_action is None
 
 
 def test_execute_without_pending_confirmation_fails():

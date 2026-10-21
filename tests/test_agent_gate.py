@@ -64,6 +64,37 @@ def test_turn_is_logged(fake_model):
     assert line["input_tokens"] == 20
 
 
+def test_confirmation_reply_is_templated_without_model_call(fake_model):
+    agent.handle_turn("s", "Return CN-1042, too small")
+    out = agent.handle_turn("s", "yes")
+    assert "templated_reply" in out["flags"]
+    assert "RT-0001" in out["answer"]
+    line = json.loads((fake_model / "turns.jsonl").read_text().splitlines()[-1])
+    assert line["latency_ms"]["model_calls"] == []  # no model call on the confirmation turn
+
+
+def test_answer_is_redacted_in_log(fake_model, monkeypatch):
+    monkeypatch.setattr(agent.litellm, "completion",
+                        lambda **kw: _response(content="We will mail jan@example.com."))
+    out = agent.handle_turn("s", "hi")
+    assert out["answer"] == "We will mail jan@example.com."  # the customer still sees it
+    line = json.loads((fake_model / "turns.jsonl").read_text().splitlines()[-1])
+    assert line["answer"] == "We will mail [EMAIL]."
+    assert "[" not in line["timestamp"]
+
+
+def test_model_failure_returns_friendly_fallback(fake_model, monkeypatch):
+    def broken(**kw):
+        raise TimeoutError("model API down")
+    monkeypatch.setattr(agent.litellm, "completion", broken)
+    out = agent.handle_turn("s", "What's the battery on the Ridge E 2025?")
+    assert out["answer"] == agent.guardrails.MODEL_ERROR_FALLBACK
+    assert "model_error:TimeoutError" in out["flags"]
+    # history stays valid: user message + fallback answer, no dangling tool calls
+    roles = [m["role"] for m in session.get_session("s").messages]
+    assert roles == ["user", "assistant"]
+
+
 def test_litellm_tool_path_imports():
     # litellm imports the undeclared 'mcp' package whenever tools are passed; keep it in requirements.txt
     import litellm.responses.mcp.chat_completions_handler  # noqa: F401
