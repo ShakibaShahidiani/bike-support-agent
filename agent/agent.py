@@ -148,6 +148,13 @@ def _return_reply(result: dict) -> str:
             "Would you like me to hand you over to a human support agent?")
 
 
+def _record_action(session: Session, result: dict) -> None:
+    """Gate decisions happen in code with a templated reply, so the model never sees a tool result for them.
+    Record the outcome in the history; otherwise the model later doubts its own reply (e.g. "I can't confirm
+    the return was started")."""
+    session.messages.append({"role": "system", "content": f"System action result (done by code): {json.dumps(result)}"})
+
+
 def _respond(turn: Turn, message: str) -> str:
     session = turn.session
     extra_system = None
@@ -163,6 +170,7 @@ def _respond(turn: Turn, message: str) -> str:
             turn.flags.append("pending_return_expired")
             if guardrails.is_confirmation(message):
                 turn.flags.append("templated_reply")
+                _record_action(session, {"status": "return_expired", "order_id": order_id})
                 return (f"That return request for order {order_id} has expired, so nothing was started. "
                         "If you still want to return it, just ask again.")
             extra_system = f"An earlier pending return for {order_id} expired without confirmation. Mention this briefly."
@@ -171,10 +179,12 @@ def _respond(turn: Turn, message: str) -> str:
             turn.tools_called.append({"name": "execute_pending_return", "args": {}})
             turn.flags.append("return_executed" if result.get("status") == "return_started" else "return_failed")
             turn.flags.append("templated_reply")
+            _record_action(session, result)
             return _return_reply(result)
         elif guardrails.is_cancellation(message):
             session.pending_action = None
             turn.flags += ["pending_return_cancelled", "templated_reply"]
+            _record_action(session, {"status": "return_cancelled_by_customer", "order_id": order_id})
             return f"Okay, I've cancelled the return request for order {order_id}. Is there anything else I can help with?"
         elif guardrails.is_related_to_pending(message, order_id):
             turn.flags.append("pending_return_kept")

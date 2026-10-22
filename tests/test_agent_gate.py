@@ -171,3 +171,17 @@ def test_second_return_request_after_execution_does_not_ask_again(fake_model):
     out = agent.handle_turn("s", "I want to return CN-1042")
     assert out["pending_confirmation"] is False
     assert len(tools.RETURNS) == 1
+
+
+def test_executed_return_is_recorded_in_history_for_the_model(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    agent.handle_turn("s", "yes")
+    notes = [m["content"] for m in session.get_session("s").messages if m["role"] == "system"]
+    assert any("return_started" in n and "RT-0001" in n for n in notes)
+
+
+def test_cancelled_return_is_recorded_in_history(fake_model):
+    agent.handle_turn("s", "I want to return order CN-1042")
+    agent.handle_turn("s", "no")
+    notes = [m["content"] for m in session.get_session("s").messages if m["role"] == "system"]
+    assert any("return_cancelled_by_customer" in n for n in notes)
