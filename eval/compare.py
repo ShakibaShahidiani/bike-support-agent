@@ -1,10 +1,15 @@
-"""Print a side-by-side table of eval summaries. Usage: python -m eval.compare v1 v2"""
+"""Print a side-by-side table of eval summaries.
+
+Usage: python -m eval.compare v1 v2   or, for the holdout suite: python -m eval.compare --holdout v1 v2
+"""
 import json
 import sys
 from pathlib import Path
 
-versions = sys.argv[1:] or ["v1", "v2"]
-runs = {v: json.loads((Path(__file__).parent / f"results_{v}.json").read_text()) for v in versions}
+args = sys.argv[1:]
+prefix = "results_holdout_" if "--holdout" in args else "results_"
+versions = [a for a in args if a != "--holdout"] or ["v1", "v2"]
+runs = {v: json.loads((Path(__file__).parent / f"{prefix}{v}.json").read_text()) for v in versions}
 
 print(f"{'metric':<32}" + "".join(f"{v:>18}" for v in versions))
 for metric in runs[versions[0]]["summary"]:

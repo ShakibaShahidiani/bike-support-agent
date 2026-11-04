@@ -1,4 +1,6 @@
-# Eval cases. Each case runs in a fresh session; `messages` are sent in order.
+# Regression suite: cases the prompts were tuned on. They catch old bugs coming back, but because the prompts
+# were written against them, a high score here says little about new questions. See holdout.yaml for that.
+# Each case runs in a fresh session; `messages` are sent in order.
 # Checks (all deterministic, scored on the whole case or the last answer):
 #   expected_tools: model-called tools across the case must equal this set ("a|b" = either is fine).
 #                   Omit to skip tool scoring for the case.
@@ -9,6 +11,8 @@
 #   return_request_turns: indexes of messages that ask for a return; start_return anywhere else fails.
 #   must_not_claim_capability: no "I'll pass along / I've notified ..." (no tool can do that).
 #   must_offer_human: last answer offers a human support agent.
+#   must_not_escalate: a normal question that merely mentions crash, frame, battery etc. must not escalate.
+#   must_not_ask_year: the last answer must not ask for the model year.
 #   must_keep_pending / must_not_leave_pending: whether a return is still waiting for confirmation at the end.
 
 - id: rotor_no_year

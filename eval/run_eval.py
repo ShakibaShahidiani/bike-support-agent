@@ -97,6 +97,10 @@ def check_case(case: dict, turns: list[dict], sess: session.Session) -> dict:
         checks["refuse"] = refuses(last)
     if case.get("must_escalate"):
         checks["escalate"] = "safety_escalation" in turns[-1]["flags"] and escalates_safely(last)
+    if case.get("must_not_escalate"):
+        checks["no_false_escalation"] = "safety_escalation" not in turns[-1]["flags"]
+    if case.get("must_not_ask_year"):
+        checks["no_needless_year_question"] = not asks_year(last)
     if case.get("must_not_promise"):
         checks["no_promise"] = not any(makes_promise(t["answer"]) for t in turns)
     if case.get("must_not_claim_capability"):
@@ -131,6 +135,13 @@ def _turn_tool_key(turn: dict) -> str:
     return ",".join(sorted({t["name"] for t in turn["tools_called"]} - {"execute_pending_return"}))
 
 
+SUITES = {"regression": "cases.yaml", "holdout": "holdout.yaml"}
+
+
+def results_name(suite: str, prompt_version: str) -> str:
+    return f"results_{prompt_version}.json" if suite == "regression" else f"results_{suite}_{prompt_version}.json"
+
+
 GATE_CHECKS = ("gate_blocked", "gate_executed", "pending_kept", "pending_cleared")
 
 
@@ -163,11 +174,13 @@ def run_case(case: dict, prompt_version: str, run: int) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", default=config.PROMPT_VERSION)
+    parser.add_argument("--suite", choices=SUITES, default="regression",
+                        help="regression: cases the prompts were tuned on. holdout: unseen cases, the honest score")
     parser.add_argument("--repeat", type=int, default=1, help="run every case N times (the model is not deterministic)")
     args = parser.parse_args()
 
     freeze_today()
-    cases = yaml.safe_load((EVAL_DIR / "cases.yaml").read_text())
+    cases = yaml.safe_load((EVAL_DIR / SUITES[args.suite]).read_text())
     results = []
     for run in range(1, args.repeat + 1):
         print(f"--- run {run}/{args.repeat}")
@@ -194,6 +207,8 @@ def main():
         "abstention_accuracy": rate(results, "abstain"),
         "refusal_rate": rate(results, "refuse"),
         "escalation_rate": rate(results, "escalate"),
+        "no_false_escalation": rate(results, "no_false_escalation"),
+        "no_needless_year_question": rate(results, "no_needless_year_question"),
         "no_promise_rate": rate(results, "no_promise"),
         "no_invented_capability": rate(results, "no_invented_capability"),
         "offers_human_when_frustrated": rate(results, "offers_human"),
@@ -204,8 +219,8 @@ def main():
     for k, v in summary.items():
         print(f"  {k:<30} {v}")
 
-    out = EVAL_DIR / f"results_{args.prompt}.json"
-    out.write_text(json.dumps({"prompt_version": args.prompt, "model": config.MODEL,
+    out = EVAL_DIR / results_name(args.suite, args.prompt)
+    out.write_text(json.dumps({"prompt_version": args.prompt, "suite": args.suite, "model": config.MODEL,
                                "run_at": datetime.now(timezone.utc).isoformat(),
                                "summary": summary, "cases": results}, indent=2, ensure_ascii=False))
     print(f"\nSaved {out}")

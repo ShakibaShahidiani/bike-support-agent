@@ -74,3 +74,14 @@ def test_freeze_today_fixes_the_date_for_tools_and_retrieval(monkeypatch):
     r.freeze_today(date(2027, 1, 1))
     assert not tools.check_return_eligibility("CN-1042")["eligible"]
     assert rag.date.today() == date(2027, 1, 1)
+
+
+def test_new_checks_flag_over_triggering():
+    turn = {"answer": "Which model year is it?", "flags": ["safety_escalation"], "tools_called": []}
+    checks = r.check_case({"must_not_escalate": True, "must_not_ask_year": True}, [turn], None)
+    assert checks == {"no_false_escalation": False, "no_needless_year_question": False}
+
+
+def test_holdout_results_never_overwrite_regression_results():
+    assert r.results_name("regression", "v3") == "results_v3.json"
+    assert r.results_name("holdout", "v3") == "results_holdout_v3.json"
