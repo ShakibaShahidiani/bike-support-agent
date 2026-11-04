@@ -3,54 +3,77 @@
 A small customer-support agent for **Ferro Cycles**, a fictional direct-to-consumer bike brand.
 Built as an interview demo. **All bikes, orders and policies are fictional, hand-written mock data.**
 
-It shows: tool calling, RAG with model-year and policy-version handling, a human confirmation gate
-before actions, code guardrails, an eval set with prompt versioning (v1 → v2), latency/token/cost
-logging, a REST API, and a chat UI with thumbs up/down feedback.
+It shows: a LangGraph workflow where the model labels and extracts and code decides, RAG with model-year and
+policy-version handling, a human confirmation pause before actions, an eval set with a blind holdout, Langfuse tracing,
+latency/token/cost logging, a REST API, and a chat UI with thumbs up/down feedback.
 
 ## Architecture
 
+The first version was a hand-written agent loop where the model chose tools. Most of its failures came from code
+guessing around the model (return-intent and safety regexes, session flags), so this version moves routing into a
+graph. The numbers are under [Eval results](#eval-results-agent-loop--graph).
+
 ```mermaid
-flowchart LR
-    UI[Streamlit UI<br/>chat + Metrics page] -->|POST /chat, /feedback<br/>GET /metrics| API[FastAPI<br/>api/main.py]
-    API --> AG[Agent loop<br/>agent/agent.py]
-    AG --> GR{Code guardrails<br/>length · confirmation gate ·<br/>safety escalation · grounding check}
-    AG -->|LiteLLM| LLM[(Chat model<br/>MODEL env var)]
-    AG --> T[Tools<br/>LangChain @tool]
-    T --> B[(bikes.json)]
-    T --> O[(orders.json)]
-    T --> R[RAG<br/>agent/rag.py]
-    R --> C[(Chroma<br/>OpenAI embeddings)]
-    AG --> L[(logs/turns.jsonl<br/>logs/feedback.jsonl)]
-    P[prompts/system_v1..v3.md] --> AG
-    E[eval/run_eval.py] --> AG
+graph TD
+    start([customer message]) --> intake
+    intake -.->|too long, off-topic, human| fixed_reply
+    intake -.-> docs
+    intake -.-> order_status
+    intake -.-> parts_collect
+    intake -.-> return_check
+    parts_collect -.->|something missing: ask, end turn| done([answer])
+    parts_collect -.->|all valid| parts_answer
+    return_check -.->|not eligible, or needs ID or reason| done
+    return_check -.->|eligible| confirm{{"confirm (interrupt: graph pauses)"}}
+    confirm -.->|clear yes| execute_return
+    confirm -.->|anything else: return cancelled| intake
+    confirm -.->|no| done
+    fixed_reply --> done
+    docs --> done
+    order_status --> done
+    parts_answer --> done
+    execute_return --> done
 ```
+
+| Node | Model? | What it does |
+|---|---|---|
+| `intake` | intent label | Length check, then one label: continue, docs, parts, order, return, human, other. A new task clears old slots |
+| `fixed_reply` | no | Templates for too long, off-topic and human handover |
+| `docs` | rewrite + answer | Standalone question, currently valid chunks only, answer with chunk IDs that code validates and renders as citations |
+| `parts_collect` | extraction | Model, year, attribute, part. Asks for one missing or invalid field and ends the turn, keeping the rest |
+| `parts_answer` | no | Fills the answer from the catalogue, so a number can't be invented. Keeps the bike for follow-ups |
+| `order_status` | no | Order ID by regex, status from the data |
+| `return_check` | extraction | Order ID, eligibility in code, then the reason. Changes nothing |
+| `confirm` | reply label | The one place the graph pauses. Only a clear yes continues |
+| `execute_return` | no | The only node that changes anything. Re-checks eligibility, idempotent |
 
 | Path | What it does |
 |---|---|
-| `agent/tools.py` | `get_bike_spec`, `check_compatibility`, `get_order_status`, `search_support_docs`, `start_return` |
-| `agent/agent.py` | One `handle_turn()` per message: guardrails → gate → tool loop (max 5) → grounding check → log |
-| `agent/guardrails.py` | Small pure functions: confirm/cancel rules, safety keywords, number grounding, PII masking |
-| `agent/metrics.py` | Joins turn logs and feedback: thumbs-up rate (CSAT proxy), latency p50/p95, cost, escalation and fallback rates per prompt version. Served by `GET /metrics`, shown on the UI's Metrics page |
+| `agent/graph.py` | The nodes and the graph |
+| `agent/agent.py` | `handle_turn()`: start or resume the graph, trace it, log the turn |
+| `agent/llm.py` | The one model call, through LiteLLM, validated against a schema |
+| `agent/tools.py` | Catalogue, order and return operations, called by nodes |
+| `agent/tracing.py` | Langfuse: one trace per message, PII masked, framework objects made readable, feedback as scores |
 | `agent/rag.py` | Loads `data/docs/*.md` into Chroma; filters out superseded policies by date |
-| `eval/` | Regression suite (28 tuned cases) and holdout suite (35 unseen cases), deterministic checks, `--repeat` runs, v1 / v2 / v3 results |
+| `agent/metrics.py` | Thumbs-up rate, latency, cost and fallback rates from the logs, shown on the UI's Metrics page |
+| `prompts/graph_v1/` | One prompt per model call. `prompts/system_v*.md` belong to the old loop |
+| `eval/` | Regression and blind holdout suites, deterministic checks, saved results |
 
 ## How to run
 
 ```bash
 uv venv --python 3.11 && uv pip install -r requirements.txt
-cp .env.example .env                        # add OPENAI_API_KEY
+cp .env.example .env                        # add OPENAI_API_KEY; Langfuse keys are optional
 .venv/bin/python -m agent.rag               # build the doc index (once)
 
 .venv/bin/python -m agent.agent             # terminal chat, or:
 .venv/bin/uvicorn api.main:app --reload     # API on :8000
 .venv/bin/streamlit run ui/app.py           # chat UI + Metrics page in the sidebar
 
-.venv/bin/pytest tests/                     # 91 unit tests, no API calls
-.venv/bin/python -m eval.run_eval --prompt v3 --repeat 3
-.venv/bin/python -m eval.compare v1 v2 v3
-.venv/bin/python -m eval.run_eval --suite holdout --prompt v3 --repeat 3   # the honest score
-.venv/bin/python -m eval.compare --holdout v1 v2 v3
-.venv/bin/python -m eval.rescore v1 v2 v3   # re-score saved answers after a scorer change, no model calls
+.venv/bin/pytest tests/                     # 90 unit tests, no API calls
+.venv/bin/python -m eval.run_eval --suite holdout --prompt graph_v1 --repeat 3   # the honest score
+.venv/bin/python -m eval.run_eval --prompt graph_v1 --repeat 3                   # regression
+.venv/bin/python -m eval.compare --holdout loop_v3 graph_v1
 ```
 
 **Deployed demo:** `bike.shakiba.nl` (password-protected; one Docker image, API + UI, see `Dockerfile`,
@@ -58,103 +81,63 @@ cp .env.example .env                        # add OPENAI_API_KEY
 
 Default model: `openai/gpt-6-luna`. Switching to Azure OpenAI only needs `MODEL=azure/<deployment>` plus credentials.
 
-## Eval results: v1 → v2 → v3
+## Eval results: agent loop → graph
 
-**Headline: v3 passes 86% of cases it was not tuned on (holdout), not the 99% of the regression suite.**
-With 35 cases the margin is about ±12 points, so treat small differences between prompts as noise.
+**Headline: on 35 cases neither version was written against, the graph passes 91% and the old agent loop 83%.**
+With 35 cases the margin is about ±10 points, so this shows no loss rather than proving a large gain.
 
-| Cases passed (× 3 runs) | v1 | v2 | v3 |
-|---|---|---|---|
-| **Holdout**: 35 unseen cases, the honest score | 80/105 (76%) | 82/105 (78%) | **90/105 (86%)** |
-| Regression: 28 cases the prompts were tuned on | 75/84 (89%) | 78/84 (93%) | 83/84 (99%) |
-
-### Why two suites
-
-The regression cases came from the same failures the prompt rules were written to fix: v3's rules and 4 of its
-cases landed in one commit, and 23 of the 28 cases pass on every prompt. They are good at catching old bugs, but
-can't show how the agent handles new questions. The holdout was written by a separate agent that was told to read
-only the data, docs and tool definitions, not the prompts, regression cases or guardrails. All prompts were run on
-it once before any fix.
-
-### What the holdout found in v3
-
-Failures are 15 of 105 runs. 12 of them are 4 cases that fail on every prompt, so a prompt change alone wouldn't
-fix most of them:
-
-| Case | Runs failed | Cause |
+| 35 blind holdout cases × 3 runs | Agent loop (prompt v3) | Graph (`graph_v1`) |
 |---|---|---|
-| "I'd like to send back CN-1042" | 3/3 | Code: the return-intent regex misses "send back <order>", so `start_return` is blocked |
-| "does the warranty cover crash damage?" before buying | 3/3 | Code: the safety keyword fires on a normal question and tells the customer to stop riding |
-| "a crack in the carbon near the seat tube" | 3/3 | Code: the safety regex needs the word "frame" |
-| "how much bigger is the battery" (2023 vs 2025) | 3/3 | Grounding check rejects the correct calculated "125 Wh", because only 625 and 750 are in the tool result |
-| Maths homework question | 1/3 | Prompt: the agent answered it |
-| Metro C brakes, cancelled order and money | 1/3 each | Test too strict: good answers, with one extra tool call |
+| **Cases passed** | 87/105 (83%) | **96/105 (91%)** |
+| Passed per run | 29, 28, 30 | 32, 32, 32 |
+| Latency avg / p95 per turn | 3329 / 4881 ms | **2323 / 3929 ms** |
+| Offers a human when it should | 7/9 | 9/9 |
+| Confirmation gate | 21/21 | 21/21 |
+| Abstains on unknown data | 11/12 | **9/12 (worse)** |
 
-### Regression suite detail
+The holdout was written by a separate agent that could read only the data and docs, not the code, prompts or other
+cases. Both versions ran on it once, and nothing was tuned on it. Every graph run passed the same 32 cases, while the
+loop's results varied, because code now makes the decisions that varied.
 
-28 cases × 3 runs per prompt, same code, model `gpt-6-luna`. Only the system prompt differs.
-The confirmation gate is enforced in code, so its score does not measure the prompt.
+### What the holdout found in the graph
 
-| Metric | v1 | v2 | v3 |
-|---|---|---|---|
-| Cases passed | 75/84 (89%) | 78/84 (93%) | **83/84 (99%)** |
-| `start_return` only when the user asks for a return | 30/33 (91%) | 33/33 (100%) | 33/33 (100%) |
-| No unneeded tool calls (per turn) | 34/39 (87%) | 38/39 (97%) | **39/39 (100%)** |
-| Tool selection accuracy | 55/57 (96%) | 54/57 (95%) | **56/57 (98%)** |
-| Offers a human when the customer is frustrated | 1/3 | 1/3 | **3/3** |
-| Asks for model year when needed | 6/6 | 6/6 | 6/6 |
-| Confirmation gate (blocked / executed / kept / cleared) | 51/51 | 51/51 | 51/51 |
-| Abstains on unknown model / order | 6/6 | 6/6 | 6/6 |
-| Refuses off-topic and prompt injection | 6/6 | 6/6 | 6/6 |
-| Safety escalation | 3/3 | 3/3 | 3/3 |
-| No promises of refunds, discounts or dates | 6/6 | 6/6 | 6/6 |
-| No invented capabilities ("I'll pass along…") | 3/3 | 3/3 | 3/3 |
-| Latency avg / p95 per turn | 3510 / 7227 ms | 3551 / 7962 ms | **3217 / 6589 ms** |
+All 9 failed runs are 3 cases. They are now seen, so they move to regression before the next holdout score.
 
-**v1 → v2** (from reading v1 eval answers): a policy question ("how many days do I have to return?") made v1
-start a return; v1 called `get_order_status` before `start_return`, although `start_return` checks the order itself.
+| Case | Cause |
+|---|---|
+| "Ridge E, not sure which year, just want the clearance" | Asks for the year even though the value is the same in both years |
+| "I bought a Strada GX in 2019" | The year of purchase isn't taken as the model year, so it asks rather than saying 2019 isn't listed |
+| Refused return, then "yes please go ahead" | **A real bug.** The bot offers a human, the customer says yes, and it answers "I can't help with that" |
 
-**v2 → v3** (from reading my own manual demo logs): the agent said *"I'll pass along your feedback"* (it can't),
-didn't offer a human when the customer was frustrated, agreed with a false claim about its earlier answer, and
-searched docs for "what is Ferro Cycles?". v3 adds a "what you can and cannot do" section and rules for these.
-Retrieval `k` was also raised from 3 to 5, because "give me all your policies" missed the sizing guide.
+### Regression
 
-**Honest notes**
-- The model is not deterministic, so results are reported over 3 runs. One v1 run scored 21/24 and another 23/24
-  on the same cases. v3 still has one flaky case (1/3: an unneeded doc search on a "which year?" question).
-- Re-scoring saved answers with a stricter scorer changed no totals, so loose regexes didn't inflate the 99%.
-  The tuning and narrow coverage did.
-- Once a holdout case is read to fix a failure, it stops being unseen: it moves to the regression suite and gets
-  a blind replacement before the next holdout score is reported.
-- The eval was **tightened twice after reading answers**: the first version scored v1 at 19/19 while real problems
-  slipped through. New cases come from failures seen in eval answers and in manual demo logs.
-- The invented-capability and false-premise cases pass for every prompt in the eval, so I could not reproduce
-  those demo failures reliably; v3 guards against them anyway.
-- Scoring is deterministic (regex and session state, no LLM judge): cheap and reproducible, but it checks
-  keywords, not answer quality.
+62 cases × 3 runs: 186/186 (100%), latency avg / p95 2538 / 5869 ms. The cases were edited after a first run
+on this suite, so this only shows that old bugs haven't come back. It says little about new questions.
+
+The regression suite holds cases that have been seen: the old loop's tuned cases plus the first holdout. Cases changed
+where behaviour changed on purpose: a question during the pause cancels the return, comparisons answer one year, and
+damage reports hand over instead of running a separate safety check. Scores from before the rewrite are kept in
+`eval/results_v*.json` and `eval/results_old_holdout_v*.json`. They aren't comparable with this suite.
 
 ## Design decisions
 
-- **The model explains, code enforces.** Anything with consequences (executing a return, eligibility, safety
-  handover, numbers in answers) is decided in code. The prompt only shapes wording and tool choice.
-- **Confirmation gate.** `start_return` only stores a pending action. The next message is checked in code:
-  exact "yes" executes; "no"/"cancel" cancels; a question or "yes but…" keeps it pending and asks again;
-  it expires after 2 follow-up turns or on an unrelated request. `start_return` also refuses to run unless
-  the user's message asks for a return.
-- **The keyword rule errs toward cancelling.** "Related to the pending return" is a keyword check. When it
-  is wrong, the return is cancelled rather than executed: the user just asks again.
-- **Version filter in retrieval.** Docs carry `valid_from`/`valid_to` (stored as YYYYMMDD integers for Chroma).
-  The superseded 14-day returns policy is never retrieved; only the current 30-day one.
-- **Model year matters.** Specs differ per year (Strada GX rotor 160 → 180 mm), so the agent asks for the year
-  instead of guessing. Unknown models or years return the list of valid ones, never a fuzzy match.
-- **Eligibility before reason.** `start_return` checks delivered + 30-day window first, so ineligible customers
-  aren't asked for a reason they don't need.
-- **Template reply after execution.** The confirmation turn replies from a fixed template: no second model call
-  (≈1.7 s → 0 ms, see `eval/latency_return_template.json`) and the return ID can't be misstated.
-- **Grounding check.** Numbers with mm/Wh/kg/V/km/days/€ in an answer must appear in that turn's tool results,
-  otherwise a safe fallback offers a human.
-- **LangChain only where it adds standard interfaces** (retrieval, tool schemas). The agent loop is ~250 lines
-  of plain Python so every step is visible and testable.
+- **The model labels and extracts, code decides.** Routing, eligibility, slots and most replies are code. Model output
+  must fit a schema, and a label can only choose between paths that already exist.
+- **Confirmation pause.** A LangGraph interrupt pauses the graph. A small model call labels the reply, and only a clear
+  yes reaches `execute_return`. Anything else cancels and goes through `intake`, so length checks still apply. A failed
+  model call never executes. Trade-off: "does shipping cost anything?" cancels the return, so the customer has to ask again.
+- **No separate safety check.** The keyword check missed "crack in the carbon" and fired on warranty questions. The router
+  now sends damage, injury and battery hazards to the human handover. Trade-off: if the router misses one, nothing catches it.
+- **Answers from data.** Spec and order answers are templates filled from the catalogue. Only `docs` has the model write
+  free text, so that's where the citation check and number grounding check run.
+- **Citations checked in code.** The model returns the chunk numbers it used. No valid number means "I don't know".
+- **Version filter in retrieval.** Docs carry `valid_from`/`valid_to`. The superseded 14-day returns policy is never retrieved.
+- **Model year matters.** Specs differ per year, so it asks instead of guessing. Unknown models or years list the valid
+  ones, never a fuzzy match.
+- **Eligibility before reason.** Ineligible customers aren't asked for a reason they don't need.
+- **Tracing shows decisions.** One Langfuse trace per message, grouped by session. Spans show what each node decided,
+  not the whole graph state, and thumbs up/down are scores on the trace. Tracing is off in tests and evals.
+- **Limitation: handover is only a message.** There are no tickets, so the reply gives a support address.
 
 ## What I would add for production
 
@@ -167,7 +150,8 @@ Retrieval `k` was also raised from 3 to 5, because "give me all your policies" m
 6. **Idempotency keys in a database.** The demo dedupes returns in memory; production needs a unique key per action.
 7. **Timeouts, retries and a fallback message** on model API failure (the demo has a basic version).
 8. **Rate limiting per session** so one user can't run up costs.
-9. **Handover on frustration:** repeated failures or angry messages route to a human agent.
+9. **Real handover:** tickets in a support system, instead of a message with an address.
+10. **Postgres checkpointer**, so paused returns survive a restart (the demo keeps state in memory).
 
 ---
 *Fictional brand and data, for demo purposes only.*
