@@ -99,7 +99,8 @@ def set_store(store: Chroma) -> None:
 def search(query: str, model: str | None = None, year: int | None = None,
            today: date | None = None, k: int = 5) -> list[dict]:
     flt = build_filter(model, year, today or date.today())
-    results = get_store().similarity_search(query, k=k, filter=flt)
+    results = get_store().as_retriever(search_kwargs={"k": k, "filter": flt}).invoke(
+        query, config={"run_name": "retrieve-documents"})
     return [{"source": d.metadata["source"], "content": d.page_content} for d in results]
 
 

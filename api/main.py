@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from agent import config
 from agent.agent import handle_turn
+from agent import tracing
 from agent.logger import log_feedback
 from agent.metrics import load_metrics
 from agent.session import SESSIONS
@@ -60,4 +61,5 @@ def feedback(req: FeedbackRequest):
     if session is None or not 1 <= req.turn_id <= session.turn_count:
         raise HTTPException(status_code=404, detail="unknown session_id or turn_id")
     log_feedback(req.session_id, req.turn_id, req.rating)
+    tracing.score_feedback(session.trace_ids.get(req.turn_id), req.rating)
     return {"status": "recorded"}

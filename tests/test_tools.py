@@ -3,10 +3,8 @@ from datetime import date
 
 import pytest
 from langchain_core.embeddings import DeterministicFakeEmbedding
-from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from agent import rag, tools
-from agent.session import Session
 
 TODAY = date(2026, 10, 21)
 
@@ -109,101 +107,59 @@ def test_search_tool_rejects_unknown_model():
     assert tools.search_support_docs.invoke({"query": "x", "model": "Nope"})["error"] == "unknown_model"
 
 
-# ---------- start_return: confirmation gate, window, idempotency ----------
+# ---------- returns: window, idempotency ----------
 
-def test_start_return_only_creates_pending_action():
-    session = Session("s1", return_allowed=True)
-    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "too small", "session": session})
-    assert result["status"] == "confirmation_required"
-    assert session.pending_action["order_id"] == "CN-1042"
-    assert tools.RETURNS == {}  # nothing executed
+def _eligibility(order_id, today=TODAY):
+    return tools.check_return_eligibility.invoke({"order_id": order_id, "today": today})
 
 
-def test_start_return_asks_reason_only_when_eligible():
-    session = Session("s1b", return_allowed=True)
-    result = tools.start_return.invoke({"order_id": "CN-1042", "session": session})
-    assert result["status"] == "reason_required"
-    assert session.pending_action is None
+def _create(order_id="CN-1042", today=TODAY):
+    return tools.create_return.invoke({"order_id": order_id, "reason": "too small", "today": today})
 
 
-@pytest.mark.parametrize("order_id", ["CN-1043", "CN-1044"])  # outside window, not delivered
-def test_start_return_rejects_ineligible_before_reason(order_id):
-    session = Session("s1c", return_allowed=True)
-    result = tools.start_return.invoke({"order_id": order_id, "session": session})
-    assert result["eligible"] is False
-    assert "reason_required" not in result.values()
-    assert session.pending_action is None
-
-
-def test_execute_without_pending_confirmation_fails():
-    session = Session("s2")
-    assert tools.execute_pending_return(session, today=TODAY) == {"error": "no_pending_confirmation"}
+def test_eligibility_check_changes_nothing():
+    assert _eligibility("CN-1042")["eligible"] is True
     assert tools.RETURNS == {}
-
-
-def test_execute_after_confirmation():
-    session = Session("s3")
-    session.pending_action = {"type": "start_return", "order_id": "CN-1042", "reason": "too small"}
-    result = tools.execute_pending_return(session, today=TODAY)
-    assert result["status"] == "return_started"
-    assert session.pending_action is None
-
-
-def test_return_is_idempotent():
-    ids = []
-    for _ in range(2):
-        session = Session("s4")
-        session.pending_action = {"type": "start_return", "order_id": "CN-1042", "reason": "x"}
-        ids.append(tools.execute_pending_return(session, today=TODAY)["return_id"])
-    assert ids[0] == ids[1]
-    assert len(tools.RETURNS) == 1
 
 
 def test_return_window_inside():
     # CN-1042 delivered 2026-10-15
-    assert tools.check_return_eligibility("CN-1042", today=date(2026, 11, 14))["eligible"] is True
+    assert _eligibility("CN-1042", date(2026, 11, 14))["eligible"] is True
 
 
 def test_return_window_outside():
-    result = tools.check_return_eligibility("CN-1042", today=date(2026, 11, 15))
+    result = _eligibility("CN-1042", date(2026, 11, 15))
     assert result["eligible"] is False
     assert "30-day" in result["reason"]
 
 
 def test_return_not_delivered():
-    assert tools.check_return_eligibility("CN-1044", today=TODAY)["eligible"] is False
+    assert _eligibility("CN-1044")["eligible"] is False
 
 
-# ---------- schemas ----------
-
-def test_session_is_hidden_from_model_schema():
-    schema = convert_to_openai_tool(tools.start_return)
-    assert set(schema["function"]["parameters"]["properties"]) == {"order_id", "reason"}
+def test_eligibility_unknown_order():
+    assert _eligibility("CN-9999")["error"] == "order_not_found"
 
 
-# ---------- return-intent gate (enforced in code) ----------
-
-def test_start_return_blocked_without_return_request():
-    session = Session("s5")  # return_allowed defaults to False
-    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
-    assert result["error"] == "no_return_request"
-    assert session.pending_action is None
+def test_create_return():
+    result = _create()
+    assert result["status"] == "return_started"
+    assert list(tools.RETURNS) == ["CN-1042"]
 
 
-def test_start_return_does_not_duplicate_pending():
-    session = Session("s6", return_allowed=True)
-    tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
-    first = dict(session.pending_action)
-    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "y", "session": session})
-    assert result["status"] == "already_pending"
-    assert session.pending_action == first
+def test_create_return_rechecks_eligibility():
+    result = _create(today=date(2026, 11, 15))  # the window closed while the customer was deciding
+    assert result["eligible"] is False
+    assert tools.RETURNS == {}
 
 
-def test_start_return_on_already_returned_order():
-    session = Session("s7", return_allowed=True)
-    session.pending_action = {"type": "start_return", "order_id": "CN-1042", "reason": "x", "created_turn": 0}
-    return_id = tools.execute_pending_return(session, today=TODAY)["return_id"]
-    result = tools.start_return.invoke({"order_id": "CN-1042", "reason": "x", "session": session})
+def test_return_is_idempotent():
+    assert _create()["return_id"] == _create()["return_id"]
+    assert len(tools.RETURNS) == 1
+
+
+def test_already_returned_order_is_reported_with_its_id():
+    return_id = _create()["return_id"]
+    result = _eligibility("CN-1042")
     assert result["status"] == "already_returned"
     assert result["return_id"] == return_id
-    assert session.pending_action is None  # no new confirmation asked

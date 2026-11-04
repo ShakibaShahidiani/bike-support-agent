@@ -1,5 +1,5 @@
 # Deployed at bike.shakiba.nl (pattern copied from ~/apps/hello on the server).
-# Secrets (OPENAI_API_KEY, DEMO_PASSWORD) live only in ~/apps/bike/.env on the server.
+# Secrets (OPENAI_API_KEY, DEMO_PASSWORD, LANGFUSE_*) live only in ~/apps/bike/.env on the server.
 services:
   app: # the API; must be named `app` for scripts/deploy.sh's /health check. Not public.
     image: ${APP_IMAGE} # Compose fills this from .env, written by scripts/deploy.sh on every deploy
@@ -10,7 +10,11 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MODEL=openai/gpt-6-luna
-      - PROMPT_VERSION=v3
+      - PROMPT_VERSION=graph_v1
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL}
+      - LANGFUSE_TRACING_ENVIRONMENT=production
     volumes:
       - logs:/app/logs # turn + feedback logs survive redeploys (Metrics page)
 

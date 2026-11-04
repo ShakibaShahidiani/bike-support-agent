@@ -5,6 +5,7 @@ Usage: python -m eval.run_eval --prompt v1
 import argparse
 import json
 import math
+import os
 import re
 import statistics
 from datetime import date, datetime, timezone
@@ -13,7 +14,9 @@ from types import SimpleNamespace
 
 import yaml
 
-from agent import config, guardrails, rag, session, tools
+os.environ.setdefault("LANGFUSE_TRACING_ENABLED", "false")  # eval traffic stays out of the demo's traces
+
+from agent import agent, config, guardrails, rag, session, tools
 from agent.agent import handle_turn
 
 EVAL_DIR = Path(__file__).parent
@@ -157,6 +160,7 @@ def p95(values: list[int]) -> int:
 
 def run_case(case: dict, prompt_version: str, run: int) -> dict:
     session.SESSIONS.clear()
+    agent.reset()
     tools.RETURNS.clear()
     sid = f"eval-{prompt_version}-{run}-{case['id']}"
     turns = [handle_turn(sid, msg, prompt_version=prompt_version) for msg in case["messages"]]

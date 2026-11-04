@@ -1,17 +1,15 @@
-"""Agent tools. Each is a LangChain @tool, so its JSON schema comes from the signature + docstring.
+"""Catalogue, order and return operations, called by graph nodes (the model never chooses them).
 
-Every tool returns a plain dict. Errors are returned (not raised) so the model can read them
-and ask the user or abstain.
+They stay LangChain @tools because that validates their arguments and shows each call as a tool span in Langfuse.
+Every tool returns a plain dict. Errors are returned, not raised, so the node can choose the reply.
 """
 import json
 import re
 from datetime import date
-from typing import Annotated
 
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import tool
 
 from agent import config, rag
-from agent.session import Session
 
 BIKES = json.loads((config.DATA_DIR / "bikes.json").read_text())
 ORDERS = {o["order_id"]: o for o in json.loads((config.DATA_DIR / "orders.json").read_text())}
@@ -25,7 +23,7 @@ RETURNS: dict[str, str] = {}
 
 # ---------- validation helpers ----------
 
-def _resolve_model(model: str) -> str | None:
+def resolve_model(model: str) -> str | None:
     """Case-insensitive exact match against the catalogue. No fuzzy matching on purpose."""
     for known in KNOWN_MODELS:
         if known.lower() == model.strip().lower():
@@ -35,7 +33,7 @@ def _resolve_model(model: str) -> str | None:
 
 def _validate_bike(model: str, year: int) -> tuple[dict | None, dict | None]:
     """Returns (spec, error)."""
-    name = _resolve_model(model)
+    name = resolve_model(model)
     if name is None:
         return None, {"error": "unknown_model", "model": model, "known_models": KNOWN_MODELS}
     if year not in KNOWN_YEARS:
@@ -100,18 +98,23 @@ def get_order_status(order_id: str) -> dict:
 def search_support_docs(query: str, model: str | None = None, year: int | None = None) -> dict:
     """Search current support docs (returns policy, warranty, sizing, care).
     Optionally filter by bike model and year. Superseded policies are never returned."""
-    if model and _resolve_model(model) is None:
+    if model and resolve_model(model) is None:
         return {"error": "unknown_model", "model": model, "known_models": KNOWN_MODELS}
-    results = rag.search(query, _resolve_model(model) if model else None, year)
+    results = rag.search(query, resolve_model(model) if model else None, year)
     return {"results": results} if results else {"results": [], "note": "no matching documents"}
 
 
-# ---------- action tool (confirmation gate) ----------
+# ---------- returns ----------
 
+@tool
 def check_return_eligibility(order_id: str, today: date | None = None) -> dict:
+    """Check if an order can be returned: delivered, inside the return window, not already returned. Changes nothing."""
     order, error = _validate_order(order_id)
     if error:
         return error
+    if order["order_id"] in RETURNS:
+        return {"eligible": False, "status": "already_returned", "order_id": order["order_id"],
+                "return_id": RETURNS[order["order_id"]], "reason": "a return already exists for this order"}
     if order["status"] != "delivered":
         return {"eligible": False, "reason": f"order status is '{order['status']}', only delivered orders can be returned"}
     days = ((today or date.today()) - date.fromisoformat(order["delivery_date"])).days
@@ -121,52 +124,14 @@ def check_return_eligibility(order_id: str, today: date | None = None) -> dict:
 
 
 @tool
-def start_return(order_id: str, session: Annotated[Session, InjectedToolArg], reason: str | None = None) -> dict:
-    """Request a return. Call this as soon as you know the order id, even without a reason:
-    it first checks eligibility (delivered, inside the return window). It does NOT execute the
-    return: the customer must confirm first by replying 'yes'."""
-    if not session.return_allowed:  # enforced in code, not only in the prompt
-        return {"error": "no_return_request",
-                "detail": "The customer did not ask for a return in this message. Do not start a return."}
-    if order_id.strip().upper() in RETURNS:
-        return {"status": "already_returned", "order_id": order_id.strip().upper(),
-                "return_id": RETURNS[order_id.strip().upper()],
-                "instruction": "Tell the customer a return already exists for this order; do not start another."}
-    pending = session.pending_action
-    if pending and pending["order_id"] == order_id.strip().upper():
-        return {"status": "already_pending", "order_id": pending["order_id"],
-                "instruction": "Ask the customer to reply 'yes' to confirm or 'no' to cancel."}
-    check = check_return_eligibility(order_id)
+def create_return(order_id: str, reason: str, today: date | None = None) -> dict:
+    """Create the return. Re-checks eligibility, because time may have passed since the customer was asked.
+    Idempotent: a second call for the same order gives the same return id."""
+    check = check_return_eligibility.invoke({"order_id": order_id, "today": today})
+    if check.get("status") == "already_returned":
+        return {"status": "return_started", "order_id": check["order_id"], "return_id": check["return_id"]}
     if not check.get("eligible"):
         return check
-    if not reason:
-        session.awaiting_return_info = True  # the next message may answer without saying "return"
-        return {"eligible": True, "status": "reason_required", "order_id": check["order_id"],
-                "instruction": "The order is eligible. Ask the customer for a short reason, then call start_return again."}
-    session.pending_action = {"type": "start_return", "order_id": check["order_id"], "reason": reason,
-                              "created_turn": session.turn_count}
-    return {
-        "status": "confirmation_required",
-        "order_id": check["order_id"],
-        "instruction": "Ask the customer to reply 'yes' to confirm the return, or 'no' to cancel.",
-    }
-
-
-def execute_pending_return(session: Session, today: date | None = None) -> dict:
-    """Called by the agent loop (never by the model) after the user confirmed."""
-    action = session.pending_action
-    if not action or action["type"] != "start_return":
-        return {"error": "no_pending_confirmation"}
-    session.pending_action = None
-    check = check_return_eligibility(action["order_id"], today)  # re-check: time may have passed
-    if not check.get("eligible"):
-        return check
-    order_id = action["order_id"]
-    if order_id not in RETURNS:
-        RETURNS[order_id] = f"RT-{len(RETURNS) + 1:04d}"
-    session.executed_returns.append(RETURNS[order_id])
-    return {"status": "return_started", "order_id": order_id, "return_id": RETURNS[order_id]}
-
-
-TOOLS = [get_bike_spec, check_compatibility, get_order_status, search_support_docs, start_return]
-TOOLS_BY_NAME = {t.name: t for t in TOOLS}
+    return_id = f"RT-{len(RETURNS) + 1:04d}"
+    RETURNS[check["order_id"]] = return_id
+    return {"status": "return_started", "order_id": check["order_id"], "return_id": return_id, "reason": reason}

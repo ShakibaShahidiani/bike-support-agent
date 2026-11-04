@@ -1,18 +1,18 @@
-"""In-memory session state per session_id (demo only; production would use Redis or a database)."""
+"""What the API and eval need to know per session_id (demo only: in memory).
+
+The conversation itself lives in the LangGraph checkpointer. `pending_action` and `executed_returns` are copied from
+the graph state after each turn.
+"""
 from dataclasses import dataclass, field
 
 
 @dataclass
 class Session:
     session_id: str
-    messages: list = field(default_factory=list)  # chat history in OpenAI message format
     turn_count: int = 0
-    pending_action: dict | None = None  # {"type": "start_return", "order_id", "reason", "created_turn"}
-    executed_returns: list = field(default_factory=list)  # return ids created in this session
-    # Return-intent gate: start_return may only run when the user asked for a return this turn,
-    # or is answering the agent's follow-up question (order id / reason) from the previous turn.
-    return_allowed: bool = False
-    awaiting_return_info: bool = False
+    pending_action: dict | None = None
+    executed_returns: list = field(default_factory=list)
+    trace_ids: dict = field(default_factory=dict)  # turn_id -> Langfuse trace id, to attach feedback
 
 
 SESSIONS: dict[str, Session] = {}

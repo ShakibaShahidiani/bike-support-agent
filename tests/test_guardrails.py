@@ -1,34 +1,9 @@
 """Unit tests for the code guardrails (no LLM calls)."""
-import pytest
+from langchain_core.documents import Document
+from langgraph.types import Command
 
 from agent import guardrails as g
-
-
-@pytest.mark.parametrize("msg", ["yes", "Yes.", "confirm", "yes, start the return", "YES please"])
-def test_confirmation_accepted(msg):
-    assert g.is_confirmation(msg)
-
-
-@pytest.mark.parametrize("msg", ["yes but what about shipping?", "maybe", "no", "sure, why not", "ok"])
-def test_confirmation_rejected(msg):
-    assert not g.is_confirmation(msg)
-
-
-@pytest.mark.parametrize("msg", [
-    "I crashed my Strada yesterday",
-    "There's a crack in my frame near the bottom bracket",
-    "my battery is swollen",
-    "smoke came out of the battery",
-    "I got injured when the fork snapped",
-])
-def test_safety_escalation_triggers(msg):
-    assert g.needs_safety_escalation(msg)
-
-
-@pytest.mark.parametrize("msg", ["how big is the Ridge E battery?", "how do I store my battery in winter?",
-                                 "what frame material is the Aero R1?"])
-def test_safety_escalation_ignores_normal_questions(msg):
-    assert not g.needs_safety_escalation(msg)
+from agent.tracing import _mask
 
 
 def test_grounding_accepts_numbers_from_tools():
@@ -49,12 +24,6 @@ def test_grounding_ignores_years_and_order_ids():
     assert g.ungrounded_numbers("Your order CN-1042 for the 2025 Strada GX.", "") == []
 
 
-def test_escalation_reply_check():
-    assert g.escalation_reply_ok("I'm sorry. Please stop riding; I'm handing you to a human support agent.")
-    assert not g.escalation_reply_ok("Tighten the axle to 12 Nm and contact a human.")
-    assert not g.escalation_reply_ok("Please stop riding.")  # no handover
-
-
 def test_pii_redaction():
     assert g.redact_pii("mail me at jan.doe@example.com or +31 6 1234 5678") == "mail me at [EMAIL] or [PHONE]"
 
@@ -64,25 +33,17 @@ def test_input_length():
     assert not g.input_too_long("x" * 2000)
 
 
-@pytest.mark.parametrize("msg", ["no", "Cancel", "no thanks", "cancel the return"])
-def test_cancellation(msg):
-    assert g.is_cancellation(msg)
+def test_trace_mask_redacts_nested_data_and_objects():
+    masked = _mask({"a": ["mail me at a.b@example.com"], "n": 3, "other": object, "cmd": Command(update={"message": "a.b@example.com"})})
+    assert "a.b@example.com" not in str(masked)
+    assert masked["n"] == 3
 
 
-@pytest.mark.parametrize("msg", ["no idea how shipping works?", "nothing else"])
-def test_not_cancellation(msg):
-    assert not g.is_cancellation(msg)
-
-
-@pytest.mark.parametrize("msg,related", [
-    ("who pays the shipping?", True), ("yes but how long does it take?", True),
-    ("what about CN-1042?", True), ("where is CN-1044?", False),
-    ("what's the rotor size on a 2025 Strada GX?", False),
-])
-def test_related_to_pending(msg, related):
-    assert g.is_related_to_pending(msg, "CN-1042") is related
-
-
-def test_return_intent():
-    assert g.has_return_intent("I want to return my bike")
-    assert not g.has_return_intent("where is my order?")
+def test_trace_shows_decisions_not_framework_objects():
+    command = Command(goto="confirm", update={"history": [{"role": "user", "content": "x"}], "order_id": "CN-1042", "reason": None})
+    assert _mask(command) == {"next": "confirm", "changes": {"order_id": "CN-1042"}}
+    assert _mask({"message": "hi", "history": [1], "year": None, "model": "Aero R1"}) == {"message": "hi", "model": "Aero R1"}
+    assert _mask({"role": "assistant", "content": '{"intent":"return"}', "additional_kwargs": {}}) == {"intent": "return"}
+    assert _mask(Document(page_content="text", metadata={"source": "a.md"})) == {"source": "a.md", "content": "text"}
+    assert _mask(Command(resume="yes")) == {"resume_with": "yes"}
+    assert _mask({"id": "x", "page_content": "text", "metadata": {"source": "a.md"}}) == {"source": "a.md", "content": "text"}

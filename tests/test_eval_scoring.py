@@ -70,9 +70,9 @@ def test_freeze_today_fixes_the_date_for_tools_and_retrieval(monkeypatch):
     monkeypatch.setattr(tools, "date", tools.date)
     monkeypatch.setattr(rag, "date", rag.date)
     r.freeze_today(date(2026, 10, 21))
-    assert tools.check_return_eligibility("CN-1042")["eligible"]
+    assert tools.check_return_eligibility.invoke({"order_id": "CN-1042"})["eligible"]
     r.freeze_today(date(2027, 1, 1))
-    assert not tools.check_return_eligibility("CN-1042")["eligible"]
+    assert not tools.check_return_eligibility.invoke({"order_id": "CN-1042"})["eligible"]
     assert rag.date.today() == date(2027, 1, 1)
 
 

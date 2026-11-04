@@ -58,7 +58,7 @@ def compute_metrics(turns: list[dict], feedback: list[dict], include_eval: bool 
             "avg_tokens": round(statistics.mean(t["input_tokens"] + t["output_tokens"] for t in ts)),
             "avg_cost_usd": round(statistics.mean(costs), 6) if costs else None,
             "total_cost_usd": round(sum(costs), 4) if costs else None,
-            "escalation_rate": _pct(sum("safety_escalation" in t["flags"] for t in ts), len(ts)),
+            "escalation_rate": _pct(sum("safety_escalation" in t["flags"] or "human_handover" in t["flags"] for t in ts), len(ts)),
             "fallback_rate": _pct(sum(any(f.startswith(FALLBACK_PREFIXES) for f in t["flags"]) for t in ts), len(ts)),
             "returns_executed": flags.count("return_executed"),
         })
