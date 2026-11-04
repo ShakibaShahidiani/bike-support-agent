@@ -32,7 +32,7 @@ flowchart LR
 | `agent/guardrails.py` | Small pure functions: confirm/cancel rules, safety keywords, number grounding, PII masking |
 | `agent/metrics.py` | Joins turn logs and feedback: thumbs-up rate (CSAT proxy), latency p50/p95, cost, escalation and fallback rates per prompt version. Served by `GET /metrics`, shown on the UI's Metrics page |
 | `agent/rag.py` | Loads `data/docs/*.md` into Chroma; filters out superseded policies by date |
-| `eval/` | 28 cases, deterministic checks, `--repeat` runs, v1 / v2 / v3 results |
+| `eval/` | Regression suite (28 tuned cases) and holdout suite (35 unseen cases), deterministic checks, `--repeat` runs, v1 / v2 / v3 results |
 
 ## How to run
 
@@ -48,6 +48,9 @@ cp .env.example .env                        # add OPENAI_API_KEY
 .venv/bin/pytest tests/                     # 91 unit tests, no API calls
 .venv/bin/python -m eval.run_eval --prompt v3 --repeat 3
 .venv/bin/python -m eval.compare v1 v2 v3
+.venv/bin/python -m eval.run_eval --suite holdout --prompt v3 --repeat 3   # the honest score
+.venv/bin/python -m eval.compare --holdout v1 v2 v3
+.venv/bin/python -m eval.rescore v1 v2 v3   # re-score saved answers after a scorer change, no model calls
 ```
 
 **Deployed demo:** `bike.shakiba.nl` (password-protected; one Docker image, API + UI, see `Dockerfile`,
@@ -57,7 +60,40 @@ Default model: `openai/gpt-6-luna`. Switching to Azure OpenAI only needs `MODEL=
 
 ## Eval results: v1 → v2 → v3
 
+**Headline: v3 passes 86% of cases it was not tuned on (holdout), not the 99% of the regression suite.**
+With 35 cases the margin is about ±12 points, so treat small differences between prompts as noise.
+
+| Cases passed (× 3 runs) | v1 | v2 | v3 |
+|---|---|---|---|
+| **Holdout**: 35 unseen cases, the honest score | 80/105 (76%) | 82/105 (78%) | **90/105 (86%)** |
+| Regression: 28 cases the prompts were tuned on | 75/84 (89%) | 78/84 (93%) | 83/84 (99%) |
+
+### Why two suites
+
+The regression cases came from the same failures the prompt rules were written to fix: v3's rules and 4 of its
+cases landed in one commit, and 23 of the 28 cases pass on every prompt. They are good at catching old bugs, but
+can't show how the agent handles new questions. The holdout was written by a separate agent that was told to read
+only the data, docs and tool definitions, not the prompts, regression cases or guardrails. All prompts were run on
+it once before any fix.
+
+### What the holdout found in v3
+
+Failures are 15 of 105 runs. 12 of them are 4 cases that fail on every prompt, so a prompt change alone wouldn't
+fix most of them:
+
+| Case | Runs failed | Cause |
+|---|---|---|
+| "I'd like to send back CN-1042" | 3/3 | Code: the return-intent regex misses "send back <order>", so `start_return` is blocked |
+| "does the warranty cover crash damage?" before buying | 3/3 | Code: the safety keyword fires on a normal question and tells the customer to stop riding |
+| "a crack in the carbon near the seat tube" | 3/3 | Code: the safety regex needs the word "frame" |
+| "how much bigger is the battery" (2023 vs 2025) | 3/3 | Grounding check rejects the correct calculated "125 Wh", because only 625 and 750 are in the tool result |
+| Maths homework question | 1/3 | Prompt: the agent answered it |
+| Metro C brakes, cancelled order and money | 1/3 each | Test too strict: good answers, with one extra tool call |
+
+### Regression suite detail
+
 28 cases × 3 runs per prompt, same code, model `gpt-6-luna`. Only the system prompt differs.
+The confirmation gate is enforced in code, so its score does not measure the prompt.
 
 | Metric | v1 | v2 | v3 |
 |---|---|---|---|
@@ -86,6 +122,10 @@ Retrieval `k` was also raised from 3 to 5, because "give me all your policies" m
 **Honest notes**
 - The model is not deterministic, so results are reported over 3 runs. One v1 run scored 21/24 and another 23/24
   on the same cases. v3 still has one flaky case (1/3: an unneeded doc search on a "which year?" question).
+- Re-scoring saved answers with a stricter scorer changed no totals, so loose regexes didn't inflate the 99%.
+  The tuning and narrow coverage did.
+- Once a holdout case is read to fix a failure, it stops being unseen: it moves to the regression suite and gets
+  a blind replacement before the next holdout score is reported.
 - The eval was **tightened twice after reading answers**: the first version scored v1 at 19/19 while real problems
   slipped through. New cases come from failures seen in eval answers and in manual demo logs.
 - The invented-capability and false-premise cases pass for every prompt in the eval, so I could not reproduce
