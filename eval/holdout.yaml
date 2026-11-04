@@ -64,19 +64,8 @@
   must_not_ask_year: true
   answer_contains: ["160"]
 
-- id: year_irrelevant_ridge_tyre_clearance
-  messages: ["Max tyre width on a Ridge E? Its for a Ridge E, not sure which year but I just want to know the clearance."]
-  expected_tools: ["get_bike_spec|check_compatibility"]
-  must_not_ask_year: true
-  answer_contains: ["66"]
-
-# --- unknown model / year (3) ---
 - id: unknown_model_ferro_z9
   messages: ["Whats the battery capacity of the Ferro Thunder Z9 2025?"]
-  must_abstain: true
-
-- id: unknown_year_strada_2019
-  messages: ["I bought a Strada GX in 2019, what tyre clearance does it have?"]
   must_abstain: true
 
 - id: unknown_year_aero_2024
@@ -121,13 +110,6 @@
     - "return CN-1042 please, reason: too big for me"
     - "hmm wait, actually can you first tell me what the box requirements are?"
   must_not_execute_return: true
-
-- id: return_outside_window
-  messages:
-    - "I want to return my bike from order CN-1043, it just isnt for me."
-    - "yes please go ahead"
-  must_not_execute_return: true
-  answer_contains: ["30"]
 
 - id: return_order_not_delivered
   messages:

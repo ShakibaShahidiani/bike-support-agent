@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Turn:
-    prompt_version: str = "graph_v1"
+    prompt_version: str = "graph_v2"
     model_calls: list[dict] = field(default_factory=list)
     tools_called: list[dict] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)

@@ -56,7 +56,7 @@ graph TD
 | `agent/tracing.py` | Langfuse: one trace per message, PII masked, framework objects made readable, feedback as scores |
 | `agent/rag.py` | Loads `data/docs/*.md` into Chroma; filters out superseded policies by date |
 | `agent/metrics.py` | Thumbs-up rate, latency, cost and fallback rates from the logs, shown on the UI's Metrics page |
-| `prompts/graph_v1/` | One prompt per model call. `prompts/system_v*.md` belong to the old loop |
+| `prompts/graph_v2/` | One prompt per model call (`graph_v1` is the scored version). `prompts/system_v*.md` belong to the old loop |
 | `eval/` | Regression and blind holdout suites, deterministic checks, saved results |
 
 ## How to run
@@ -72,7 +72,7 @@ cp .env.example .env                        # add OPENAI_API_KEY; Langfuse keys 
 
 .venv/bin/pytest tests/                     # 90 unit tests, no API calls
 .venv/bin/python -m eval.run_eval --suite holdout --prompt graph_v1 --repeat 3   # the honest score
-.venv/bin/python -m eval.run_eval --prompt graph_v1 --repeat 3                   # regression
+.venv/bin/python -m eval.run_eval --prompt graph_v2 --repeat 3                   # regression
 .venv/bin/python -m eval.compare --holdout loop_v3 graph_v1
 ```
 
@@ -101,18 +101,23 @@ loop's results varied, because code now makes the decisions that varied.
 
 ### What the holdout found in the graph
 
-All 9 failed runs are 3 cases. They are now seen, so they move to regression before the next holdout score.
+All 9 failed runs are 3 cases. They moved to regression, so the holdout now has 32 cases and needs 3 blind replacements
+before its next score.
 
-| Case | Cause |
-|---|---|
-| "Ridge E, not sure which year, just want the clearance" | Asks for the year even though the value is the same in both years |
-| "I bought a Strada GX in 2019" | The year of purchase isn't taken as the model year, so it asks rather than saying 2019 isn't listed |
-| Refused return, then "yes please go ahead" | **A real bug.** The bot offers a human, the customer says yes, and it answers "I can't help with that" |
+| Case | Cause | Status |
+|---|---|---|
+| "Ridge E, not sure which year, just want the clearance" | Asks for the year even though the value is the same in both years | Open |
+| "I bought a Strada GX in 2019" | The year of purchase isn't taken as the model year, so it asks rather than saying 2019 isn't listed | Open |
+| Refused return, then "yes please go ahead" | The bot offered a human, the customer said yes, and it answered "I can't help with that" | Fixed in `graph_v2` |
+
+**The deployed version is `graph_v2`:** `graph_v1` plus one router rule for that bug. The 91% above is `graph_v1`;
+`graph_v2` hasn't had a blind holdout score.
 
 ### Regression
 
-62 cases × 3 runs: 186/186 (100%), latency avg / p95 2538 / 5869 ms. The cases were edited after a first run
-on this suite, so this only shows that old bugs haven't come back. It says little about new questions.
+`graph_v2`, 65 cases × 1 run: 63/65 (97%), latency avg / p95 2434 / 5414 ms. The two failures are the open cases above.
+(`graph_v1` passed 186/186 over 3 runs on the earlier 62 cases.) Cases were edited after a first run on this suite, so
+this only shows that old bugs haven't come back. It says little about new questions.
 
 The regression suite holds cases that have been seen: the old loop's tuned cases plus the first holdout. Cases changed
 where behaviour changed on purpose: a question during the pause cancels the return, comparisons answer one year, and

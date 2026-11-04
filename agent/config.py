@@ -15,7 +15,7 @@ CHROMA_DIR = ROOT / "chroma_db"
 
 MODEL = os.getenv("MODEL", "openai/gpt-6-luna")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-PROMPT_VERSION = os.getenv("PROMPT_VERSION", "graph_v1")
+PROMPT_VERSION = os.getenv("PROMPT_VERSION", "graph_v2")
 
 MAX_INPUT_CHARS = 2000
 MODEL_TIMEOUT_S = 30

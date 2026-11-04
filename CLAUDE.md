@@ -57,7 +57,7 @@ latency/token logging, Langfuse tracing, prompt versioning, a REST API, and a si
 - `execute_return`: `create_return`, template reply, clear state. The only node that changes anything.
 - State is checkpointed per session with `InMemorySaver` (demo only).
 - Safety: no separate check. The router sends damage, injury and battery hazards to `human`. PII is redacted before logging.
-- Prompts: one file per model-calling node in `prompts/<version>/` (default `graph_v1`); the version is logged every turn.
+- Prompts: one file per model-calling node in `prompts/<version>/` (default `graph_v2`); the version is logged every turn.
   `prompts/system_v*.md` belong to the earlier agent loop and are kept with their eval results.
 - Prompt rules (checked by eval): off-topic refusal, ignore prompt injection, never promise refunds, discounts or dates.
 

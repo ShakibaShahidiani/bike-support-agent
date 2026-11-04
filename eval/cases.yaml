@@ -425,3 +425,25 @@
   must_execute_return: true
   must_not_claim_capability: true
   must_offer_human: true
+
+# ---------- Second holdout, read after scoring graph_v1. No longer unseen ----------
+
+- id: h2_year_irrelevant_ridge_tyre_clearance
+  messages: ["Max tyre width on a Ridge E? Its for a Ridge E, not sure which year but I just want to know the clearance."]
+  expected_tools: ["get_bike_spec|check_compatibility"]
+  must_not_ask_year: true
+  answer_contains: ["66"]
+
+# --- unknown model / year (3) ---
+
+- id: h2_unknown_year_strada_2019
+  messages: ["I bought a Strada GX in 2019, what tyre clearance does it have?"]
+  must_abstain: true
+
+- id: h2_return_outside_window
+  messages:
+    - "I want to return my bike from order CN-1043, it just isnt for me."
+    - "yes please go ahead"
+  must_not_execute_return: true
+  must_offer_human: true
+  answer_not_contains: ["can't help"]
