@@ -26,8 +26,8 @@ latency/token logging, Langfuse tracing, prompt versioning, a REST API, and a si
 - `bikes.json`: Strada GX (gravel), Aero R1 (road), Ridge E (e-MTB), Metro C (city), each 2023 and 2025.
   Each entry: frame, fork, brake type, max rotor size (front/rear), tyre clearance, battery (if e-bike).
   Differences: Strada GX rotor 160→180mm and tyre clearance 42→45mm; Ridge E battery 625→750Wh.
-- `orders.json`: 5 orders (`CN-1042` …): delivered inside the 30-day window, delivered outside it,
-  shipped, processing, cancelled. No real names or emails.
+- `orders.json`: 10 orders (`CN-1042` …): six delivered inside the 30-day window, so a demo has several to return,
+  and one each delivered outside it, shipped, processing, cancelled. No real names or emails.
 - `docs/`: 4 to 6 short markdown support docs, all labelled "fictional policy for demo".
   Returns policy in TWO versions: old (14 days, buyer pays shipping, valid 2023-01-01 to 2025-12-31)
   and current (30 days, free return shipping, valid_from 2026-01-01, no valid_to).
